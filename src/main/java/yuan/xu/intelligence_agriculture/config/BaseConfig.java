@@ -10,4 +10,6 @@ import org.springframework.context.annotation.Configuration;
 @MapperScan("com.dsl.core.dao")
 @Configuration
 public class BaseConfig {
+    //23423
+    // 123
 }
