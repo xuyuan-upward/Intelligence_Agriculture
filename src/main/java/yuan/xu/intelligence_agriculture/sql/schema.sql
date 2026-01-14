@@ -76,8 +76,6 @@ create table sys_control_device (
                                     device_name varchar(100) comment '设备名称',
                                     greenhouse_env_code varchar(64) not null comment '所属环境',
                                     control_mode int default 0 comment '控制模式(0:手动,1:自动)',
-                                    threshold_type int comment '关联的阈值类型',
-                                    device_type int default 0 comment '设备类型(0:低开高关, 1:高开低关)',
                                     status tinyint default 0 comment '当前状态(0:关,1:开)',
                                     update_time datetime default CURRENT_TIMESTAMP
                                         on update CURRENT_TIMESTAMP,

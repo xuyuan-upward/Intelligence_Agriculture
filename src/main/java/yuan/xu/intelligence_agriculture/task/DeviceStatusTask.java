@@ -45,28 +45,11 @@ public class DeviceStatusTask {
     @Scheduled(fixedRate = 2000)
     public void checkDeviceStatus() {
         // 1. 获取所有设备列表（从缓存获取，避免数据库压力）
-        List<SysControlDevice> controlDevices = sysControlDeviceService.listAllDevicesFromCache();
         List<SysSensorDevice> sensorDevices = sysSensorDeviceService.listAllDevicesFromCache();
         
         Map<String, Integer> currentStatusMap = new HashMap<>();
 
         long currentTime = System.currentTimeMillis();
-
-        // 处理控制设备
-        for (SysControlDevice device : controlDevices) {
-            String deviceCode = device.getDeviceCode();
-            String key = "iot:device:active:" + deviceCode;
-            Object lastActive = redisTemplate.opsForValue().get(key);
-
-            int status = 0;
-            if (lastActive != null) {
-                long lastTime = Long.parseLong(lastActive.toString());
-                if (currentTime - lastTime < 6000) {
-                    status = 1;
-                }
-            }
-            currentStatusMap.put(deviceCode, status);
-        }
 
         // 处理采集设备
         for (SysSensorDevice device : sensorDevices) {

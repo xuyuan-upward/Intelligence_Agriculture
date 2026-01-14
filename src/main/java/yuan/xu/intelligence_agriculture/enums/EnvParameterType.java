@@ -18,7 +18,7 @@ public enum EnvParameterType {
     private final String envParameterName;
 
     // getter
-    public int getEnvParameterType() {
+    public Integer getEnvParameterType() {
         return envParameterType;
     }
 

@@ -47,11 +47,6 @@ public class SysControlDevice implements Serializable {
     private Integer controlMode;
 
     /**
-     * 设备类型 (0:低开高关, 1:高开低关)
-     */
-    private Integer deviceType;
-
-    /**
      * 当前开关状态 (0:关, 1:开)
      */
     private Integer status;

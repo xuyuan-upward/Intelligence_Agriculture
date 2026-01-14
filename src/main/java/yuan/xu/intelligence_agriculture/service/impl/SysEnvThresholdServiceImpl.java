@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit;
 public class SysEnvThresholdServiceImpl extends ServiceImpl<SysEnvThresholdMapper, SysEnvThreshold> implements SysEnvThresholdService {
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
-    private static final String ALL_ENV_THRESHOLD_KEY = "iot:all_env_thresholds";
+     static final String ALL_ENV_THRESHOLD_KEY = "iot:all_env_thresholds";
 
     @PostConstruct
     public void init() {
@@ -31,7 +31,9 @@ public class SysEnvThresholdServiceImpl extends ServiceImpl<SysEnvThresholdMappe
         List<SysEnvThreshold> list = list();
         redisTemplate.delete(ALL_ENV_THRESHOLD_KEY);
         if (!list.isEmpty()) {
-            redisTemplate.opsForValue().set(ALL_ENV_THRESHOLD_KEY, list, 24, TimeUnit.HOURS);
+            redisTemplate.opsForList().rightPushAll(ALL_ENV_THRESHOLD_KEY, list);
+            // 2. 为整个列表设置过期时间（例如：1小时）
+            redisTemplate.expire(ALL_ENV_THRESHOLD_KEY, 24, TimeUnit.HOURS);
         }
         log.info("Redis 环境阈值缓存已刷新，当前环境阈值数量: {}", list.size());
     }

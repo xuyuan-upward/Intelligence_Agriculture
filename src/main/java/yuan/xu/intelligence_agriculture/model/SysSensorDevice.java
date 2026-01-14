@@ -39,6 +39,10 @@ public class SysSensorDevice implements Serializable {
 //     * 设备类型 (11:TEMP, 12:HUM, 13:S_TEMP, 14:S_HUM, 15:LIGHT_S, 16:CO2_S)
 //     */
 //    private Integer deviceType;
+    /**
+     * 环境参数类型
+     */
+    private Integer envParameterType;
 
     /**
      * 在线状态 (0: 离线, 1: 在线) - 非数据库字段

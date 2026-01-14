@@ -13,6 +13,8 @@ import javax.annotation.PostConstruct;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+import static yuan.xu.intelligence_agriculture.service.impl.IotDataServiceImpl.DEVICE_LAST_ACTIVE_KEY;
+
 /**
  * 采集设备管理业务实现类
  */
@@ -51,7 +53,7 @@ public class SysSensorDeviceServiceImpl extends ServiceImpl<SysSensorDeviceMappe
         if (list != null) {
             long currentTime = System.currentTimeMillis();
             for (SysSensorDevice device : list) {
-                String key = "iot:device:active:" + device.getDeviceCode();
+                String key = DEVICE_LAST_ACTIVE_KEY + device.getDeviceCode();
                 Object lastActive = redisTemplate.opsForValue().get(key);
                 if (lastActive != null && (currentTime - Long.parseLong(lastActive.toString()) < 6000)) {
                     device.setOnlineStatus(1);

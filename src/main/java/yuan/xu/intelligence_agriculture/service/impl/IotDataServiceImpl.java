@@ -21,7 +21,9 @@ import java.math.BigDecimal;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import static yuan.xu.intelligence_agriculture.enums.EnvParameterType.*;
 
@@ -42,7 +44,7 @@ public class IotDataServiceImpl extends ServiceImpl<IotSensorDataMapper, IotSens
     /**
      * Redis 中存储设备最后在线时间的 Key 前缀
      */
-    private static final String DEVICE_LAST_ACTIVE_KEY = "iot:device:active:";
+     static final String DEVICE_LAST_ACTIVE_KEY = "iot:device:active:";
 
     /**
      * 处理从 MQTT 接收到的传感器数据
@@ -69,22 +71,37 @@ public class IotDataServiceImpl extends ServiceImpl<IotSensorDataMapper, IotSens
                 IotSensorData data = new IotSensorData();
                 data.setGreenhouseEnvCode(envCode);
                 data.setCreateTime(new Date());
+                // 根据对应的类型,抽象出来对应的类,方便后续的赋值
                 for (SensorData sensorData : sensorDataList) {
                     String deviceCode = sensorData.getDeviceCode();
                     Integer type = sensorData.getEnvParameterType();
                     BigDecimal value = sensorData.getData() != null ? new BigDecimal(sensorData.getData()) : null;
                     // 更新每个采集传感器的独立在线状态
                     redisTemplate.opsForValue().set(DEVICE_LAST_ACTIVE_KEY + envCode + deviceCode, now, 10, TimeUnit.SECONDS);
+
+                    // 推送采集设备在线状态给前端
+                    Map<String, Object> sensorStatusMsg = new HashMap<>();
+                    sensorStatusMsg.put("type", "SENSOR_DEVICE_STATUS");
+                    Map<String, Object> sensorStatusData = new HashMap<>();
+                    sensorStatusData.put("deviceCode", deviceCode);
+                    sensorStatusData.put("onlineStatus", 1);
+                    sensorStatusMsg.put("data", sensorStatusData);
+                    WebSocketServer.sendInfo(JSONUtil.toJsonStr(sensorStatusMsg));
                     
                     if (type == null || value == null) continue;
 
                     // 根据采集参数类型给对应的字段赋值
-                    if (AIR_TEMP.getEnvParameterType()==type) data.setAirTemp(value);
-                    else if (AIR_HUMIDITY.getEnvParameterType()==type) data.setAirHumidity(value);
-                    else if (SOIL_TEMP.getEnvParameterType()==type) data.setSoilTemp(value);
-                    else if (SOIL_HUMIDITY.getEnvParameterType()==type) data.setSoilHumidity(value);
-                    else if (CO2_CONCENTRATION.getEnvParameterType()==type) data.setCo2Concentration(value);
-                    else if (LIGHT_INTENSITY.getEnvParameterType()==type) data.setLightIntensity(value);
+                    if (AIR_TEMP.getEnvParameterType()==type){ data.setAirTemp(value);}
+
+                    else if (AIR_HUMIDITY.getEnvParameterType()==type){ data.setAirHumidity(value);} else if (SOIL_TEMP.getEnvParameterType() == type) {
+
+                        data.setSoilTemp(value);
+                    } else if (SOIL_HUMIDITY.getEnvParameterType() == type){ data.setSoilHumidity(value);}
+
+                    else if (CO2_CONCENTRATION.getEnvParameterType() == type){ data.setCo2Concentration(value);}
+
+                    else if (LIGHT_INTENSITY.getEnvParameterType() == type){ data.setLightIntensity(value);}
+
                 }
 
                 // todo 4. 持久化到数据库 有待优化:得进行批量插入
@@ -95,7 +112,9 @@ public class IotDataServiceImpl extends ServiceImpl<IotSensorDataMapper, IotSens
                 }
 
                 // 5. 触发自动"控制"设备逻辑
-                sysControlDeviceService.checkAndAutoControl(data);
+                Map<Integer, SensorData> integerSensorDataMap = sensorDataList.stream().collect(Collectors.toMap(SensorData::getEnvParameterType, sensorData -> sensorData));
+
+                sysControlDeviceService.checkAndAutoControl(data,integerSensorDataMap);
 
                 // 6. WebSocket 实时推送
                 HashMap<String, Object> wsMessage = new HashMap<>();

@@ -7,6 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
+import yuan.xu.intelligence_agriculture.dto.SensorData;
+import yuan.xu.intelligence_agriculture.enums.ControlStatus;
 import yuan.xu.intelligence_agriculture.mapper.SysControlDeviceMapper;
 import yuan.xu.intelligence_agriculture.mapper.SysControlLogMapper;
 import yuan.xu.intelligence_agriculture.model.IotSensorData;
@@ -22,6 +24,13 @@ import javax.annotation.PostConstruct;
 import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+
+import static yuan.xu.intelligence_agriculture.enums.ControlStatus.OFF;
+import static yuan.xu.intelligence_agriculture.enums.ControlStatus.ON;
+import static yuan.xu.intelligence_agriculture.enums.EnvParameterType.*;
+import static yuan.xu.intelligence_agriculture.service.impl.IotDataServiceImpl.DEVICE_LAST_ACTIVE_KEY;
+import static yuan.xu.intelligence_agriculture.service.impl.SysEnvThresholdServiceImpl.ALL_ENV_THRESHOLD_KEY;
 
 /**
  * 控制设备管理与业务实现类
@@ -47,15 +56,18 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
 
     @PostConstruct
     public void init() {
+        // 自懂控制的
         refreshAutoDeviceCache();
-        refreshAllDeviceCache();
+//        refreshAllDeviceCache();
     }
 
     private void refreshAllDeviceCache() {
         List<SysControlDevice> list = this.list();
         redisTemplate.delete(ALL_CONTROL_DEVICES_KEY);
         if (!list.isEmpty()) {
-            redisTemplate.opsForValue().set(ALL_CONTROL_DEVICES_KEY, list, 24, TimeUnit.HOURS);
+            redisTemplate.opsForList().rightPushAll(ALL_CONTROL_DEVICES_KEY, list);
+            // 2. 为整个列表设置过期时间（例如：1小时）
+            redisTemplate.expire(ALL_CONTROL_DEVICES_KEY, 24, TimeUnit.HOURS);
         }
         log.info("Redis 全量控制设备缓存已刷新，当前设备总数: {}", list.size());
     }
@@ -68,7 +80,9 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
         redisTemplate.delete(AUTO_DEVICE_KEY);
 
         if (!list.isEmpty()) {
-            redisTemplate.opsForValue().set(AUTO_DEVICE_KEY, list, 24, TimeUnit.HOURS);
+            redisTemplate.opsForList().rightPushAll(AUTO_DEVICE_KEY, list);
+            // 2. 为整个列表设置过期时间（例如：1小时）
+            redisTemplate.expire(AUTO_DEVICE_KEY, 24, TimeUnit.HOURS);
         }
         log.info("Redis 自动控制设备缓存已刷新，当前自动模式设备数量: {}", list.size());
     }
@@ -87,7 +101,7 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
         if (list != null) {
             long currentTime = System.currentTimeMillis();
             for (SysControlDevice device : list) {
-                String key = "iot:device:active:" + device.getDeviceCode();
+                String key = DEVICE_LAST_ACTIVE_KEY + device.getDeviceCode();
                 Object lastActive = redisTemplate.opsForValue().get(key);
                 if (lastActive != null && (currentTime - Long.parseLong(lastActive.toString()) < 6000)) {
                     device.setOnlineStatus(1);
@@ -100,17 +114,19 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
     }
 
 
-
+    /**
+     * 下发命令
+     * @param deviceId 对应的设备ID
+     * @param status
+     */
     @Override
     public void controlDevice(Long deviceId, Integer status) {
         SysControlDevice device = this.getById(deviceId);
         if (device == null) return;
-
-        log.info("执行设备控制: 设备名称={}, 目标状态={}", device.getDeviceName(), status == 1 ? "开启" : "关闭");
-
         Map<String, Object> command = new HashMap<>();
         command.put("deviceCode", device.getDeviceCode());
         command.put("command", status == 1 ? "ON" : "OFF");
+        // 发送给MQTT
         mqttGateway.sendToMqtt(JSONUtil.toJsonStr(command));
 
         SysControlLog logEntry = new SysControlLog();
@@ -128,10 +144,11 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
         if (device.getControlMode() == 1) {
             refreshAutoDeviceCache();
         }
-        refreshAllDeviceCache();
+        // todo 对应的采集设备不需要关注
+//        refreshAllDeviceCache();
 
         Map<String, Object> deviceUpdateMsg = new HashMap<>();
-        deviceUpdateMsg.put("type", "DEVICE_UPDATE");
+        deviceUpdateMsg.put("type", "CONTROL_DEVICE_STATUS");
         Map<String, Object> deviceData = new HashMap<>();
         deviceData.put("deviceCode", device.getDeviceCode());
         deviceData.put("status", status);
@@ -174,60 +191,61 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
 
     @Override
     @SuppressWarnings("unchecked")
-    public void checkAndAutoControl(IotSensorData data) {
+    public void checkAndAutoControl(IotSensorData data, Map<Integer, SensorData> integerSensorDataMap) {
         List<SysControlDevice> autoDeviceCache = (List<SysControlDevice>) redisTemplate.opsForValue().get(AUTO_DEVICE_KEY);
-        if (autoDeviceCache == null || autoDeviceCache.isEmpty()) {
+        List<SysEnvThreshold> sysEnvThresholdList = (List<SysEnvThreshold>) redisTemplate.opsForValue().get(ALL_ENV_THRESHOLD_KEY);
+
+        if (autoDeviceCache == null || autoDeviceCache.isEmpty() || sysEnvThresholdList == null) {
             return;
         }
 
-        for (SysControlDevice device : autoDeviceCache) {
-            BigDecimal currentValue = null;
-            // 关联环境阈值的ID
-            Long thresholdType = device.getEnvThresholdId();
-            
-            // 根据设备关联的阈值类型，获取当前传感器数据中对应的数值
-            if (Integer.valueOf(1).equals(thresholdType)) currentValue = data.getAirTemp();
-            else if (Integer.valueOf(2).equals(thresholdType)) currentValue = data.getAirHumidity();
-            else if (Integer.valueOf(3).equals(thresholdType)) currentValue = data.getSoilTemp();
-            else if (Integer.valueOf(4).equals(thresholdType)) currentValue = data.getSoilHumidity();
-            else if (Integer.valueOf(5).equals(thresholdType)) currentValue = data.getCo2Concentration();
-            else if (Integer.valueOf(6).equals(thresholdType)) currentValue = data.getLightIntensity();
-            
-            if (currentValue == null) continue;
+        // 转换为 Map<阈值ID, 阈值对象>
+        Map<Long, SysEnvThreshold> envThresholdMap = sysEnvThresholdList.stream()
+                .collect(Collectors.toMap(SysEnvThreshold::getId, t -> t, (e, r) -> e));
 
-            // 获取关联的阈值配置
-            SysEnvThreshold threshold = sysEnvThresholdService.getById(device.getEnvThresholdId());
-            if (threshold == null) {
-                log.warn("设备 {} 未关联有效的阈值配置", device.getDeviceName());
-                continue;
-            }
+        for (SysControlDevice sysControlDevice : autoDeviceCache) {
+            SysEnvThreshold threshold = envThresholdMap.get(sysControlDevice.getEnvThresholdId());
+            if (threshold == null) continue;
 
+            // 获取当前传感器数值
+            SensorData sensorData = integerSensorDataMap.get(threshold.getEnvParameterType());
+            if (sensorData == null || sensorData.getData() == null) continue;
+
+            BigDecimal currentVal = sensorData.getData();
             BigDecimal min = threshold.getMinValue();
             BigDecimal max = threshold.getMaxValue();
             if (min == null || max == null) continue;
 
+            Integer typeCode = threshold.getEnvParameterType();
             boolean shouldOpen = false;
             boolean shouldClose = false;
 
-            // 根据设备类型判断控制逻辑
-            // deviceType: 0 (低开高关, 如加热器/灌溉), 1 (高开低关, 如风扇/降温)
-            if (Integer.valueOf(1).equals(device.getDeviceType())) {
-                 if (currentValue.compareTo(max) > 0) shouldOpen = true;
-                 else if (currentValue.compareTo(min) < 0) shouldClose = true;
-            } else {
-                 if (currentValue.compareTo(min) < 0) shouldOpen = true;
-                 else if (currentValue.compareTo(max) > 0) shouldClose = true;
+            // 1. 低开高关类逻辑（加热、补光）：小于下限开启，大于下限关闭
+            if (AIR_TEMP.getEnvParameterType().equals(typeCode) || 
+                SOIL_TEMP.getEnvParameterType().equals(typeCode) || 
+                LIGHT_INTENSITY.getEnvParameterType().equals(typeCode)) {
+                if (currentVal.compareTo(min) < 0) shouldOpen = true;
+                else if (currentVal.compareTo(min) > 0) shouldClose = true;
+            } 
+            // 2. 高开低关类逻辑（排风、降碳）：大于上限开启，小于上限关闭
+            else if (AIR_HUMIDITY.getEnvParameterType().equals(typeCode) || 
+                     SOIL_HUMIDITY.getEnvParameterType().equals(typeCode) || 
+                     CO2_CONCENTRATION.getEnvParameterType().equals(typeCode)) {
+                if (currentVal.compareTo(max) > 0) shouldOpen = true;
+                else if (currentVal.compareTo(max) < 0) shouldClose = true;
             }
 
-            if (shouldOpen && (device.getStatus() == null || device.getStatus() == 0)) {
-                log.info("【自动控制触发】指标: {}, 当前值: {}, 开启设备: {}", 
-                        thresholdType, currentValue, device.getDeviceName());
-                controlDevice(device.getId(), 1);
-            } else if (shouldClose && (device.getStatus() != null && device.getStatus() == 1)) {
-                log.info("【自动控制触发】指标: {}, 当前值: {}, 关闭设备: {}", 
-                        thresholdType, currentValue, device.getDeviceName());
-                controlDevice(device.getId(), 0);
+            // 执行开关动作（状态发生变化才执行）
+            if (shouldOpen && OFF.getCode().equals(sysControlDevice.getStatus())) {
+                log.info("【自动控制触发】指标类型: {}, 当前值: {}, 开启设备: {}",
+                        typeCode, currentVal, sysControlDevice.getDeviceName());
+                controlDevice(sysControlDevice.getId(), ON.getCode());
+            } else if (shouldClose && ON.getCode().equals(sysControlDevice.getStatus())) {
+                log.info("【自动控制触发】指标类型: {}, 当前值: {}, 关闭设备: {}",
+                        typeCode, currentVal, sysControlDevice.getDeviceName());
+                controlDevice(sysControlDevice.getId(), OFF.getCode());
             }
         }
     }
+
 }

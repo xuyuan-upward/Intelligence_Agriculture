@@ -2,6 +2,8 @@ package yuan.xu.intelligence_agriculture.dto;
 
 import lombok.Data;
 
+import java.math.BigDecimal;
+
 @Data
 public class SensorData {
     /**
@@ -18,7 +20,7 @@ public class SensorData {
     /**
      * 设备数据
      */
-    private Integer data;
+    private BigDecimal data;
 
 }
 
