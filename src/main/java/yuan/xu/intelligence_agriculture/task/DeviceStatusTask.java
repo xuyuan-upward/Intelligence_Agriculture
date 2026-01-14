@@ -51,7 +51,7 @@ public class DeviceStatusTask {
             String deviceCode = device.getDeviceCode();
             // 2. 从 Redis 获取最后活跃时间
             Object lastActiveObj = redisTemplate.opsForValue().get(DEVICE_LAST_ACTIVE_KEY + deviceCode);
-            
+            // 默认值
             int isOnline = 0; // 默认离线
             if (lastActiveObj != null) {
                 long lastActiveTime = Long.parseLong(lastActiveObj.toString());
