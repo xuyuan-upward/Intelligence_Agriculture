@@ -40,43 +40,46 @@ public class DeviceStatusTask {
 
     /**
      * 每 2 秒执行一次状态检查
-     * 检查对应的采集设备的在线状态,发生变更推送给前端
+     * 检查采集和控制设备的在线状态，发生变更推送给前端
      */
     @Scheduled(fixedRate = 2000)
     public void checkDeviceStatus() {
-        // 1. 获取所有设备列表（从缓存获取，避免数据库压力）
-        List<SysSensorDevice> sensorDevices = sysSensorDeviceService.listAllDevicesFromCache();
-        
-        Map<String, Integer> currentStatusMap = new HashMap<>();
-
         long currentTime = System.currentTimeMillis();
-
-        // 处理采集设备
+        
+        // 1. 处理采集设备在线状态
+        List<SysSensorDevice> sensorDevices = sysSensorDeviceService.listAllDevicesFromCache();
         for (SysSensorDevice device : sensorDevices) {
             String deviceCode = device.getDeviceCode();
-            String key = "iot:device:active:" + deviceCode;
-            Object lastActive = redisTemplate.opsForValue().get(key);
-
-            int status = 0;
-            if (lastActive != null) {
-                long lastTime = Long.parseLong(lastActive.toString());
-                if (currentTime - lastTime < 6000) {
-                    status = 1;
-                }
+            int currentStatus = isDeviceOnline(deviceCode, currentTime);
+            
+            if (!Integer.valueOf(currentStatus).equals(lastStatusMap.get(deviceCode))) {
+                lastStatusMap.put(deviceCode, currentStatus);
+                sendDeviceStatusUpdate("SENSOR_DEVICE_STATUS", deviceCode, currentStatus);
             }
-            currentStatusMap.put(deviceCode, status);
         }
+    }
 
-        // 4. 如果状态发生了变化，或者这是第一次运行，则通过 WebSocket 推送给前端
-        if (!currentStatusMap.equals(lastStatusMap)) {
-            lastStatusMap = new HashMap<>(currentStatusMap);
-            
-            Map<String, Object> message = new HashMap<>();
-            message.put("type", "DEVICE_STATUS");
-            message.put("data", currentStatusMap);
-            
-            WebSocketServer.sendInfo(JSONUtil.toJsonStr(message));
-            log.info("设备在线状态发生变化，已推送至前端: {}", currentStatusMap);
+    private int isDeviceOnline(String deviceCode, long currentTime) {
+        String key = "iot:device:active:" + deviceCode;
+        Object lastActive = redisTemplate.opsForValue().get(key);
+        if (lastActive != null) {
+            long lastTime = Long.parseLong(lastActive.toString());
+            if (currentTime - lastTime < 10000) { // 10秒内有心跳则在线
+                return 1;
+            }
         }
+        return 0;
+    }
+
+    private void sendDeviceStatusUpdate(String type, String deviceCode, int onlineStatus) {
+        Map<String, Object> message = new HashMap<>();
+        message.put("type", type);
+        Map<String, Object> data = new HashMap<>();
+        data.put("deviceCode", deviceCode);
+        data.put("onlineStatus", onlineStatus);
+        message.put("data", data);
+        
+        WebSocketServer.sendInfo(JSONUtil.toJsonStr(message));
+        log.info("设备[{}]在线状态变化: {}, 已推送至前端", deviceCode, onlineStatus == 1 ? "在线" : "离线");
     }
 }
