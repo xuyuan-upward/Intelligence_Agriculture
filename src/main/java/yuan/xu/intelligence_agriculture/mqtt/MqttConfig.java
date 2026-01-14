@@ -24,7 +24,7 @@ public class MqttConfig {
     // MQTT 代理服务器地址
     private static final String MQTT_BROKER_URL = "tcp://broker.emqx.io:1883";
     // 客户端 ID，使用时间戳保证唯一性
-    private static final String CLIENT_ID = "springboot_server_" + System.currentTimeMillis();
+    private static final String CLIENT_ID = "springboot_server";
     // 传感器数据订阅主题
     private static final String TOPIC_SENSOR = "sensor/data";
 

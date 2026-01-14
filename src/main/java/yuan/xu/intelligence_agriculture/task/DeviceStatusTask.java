@@ -6,8 +6,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import yuan.xu.intelligence_agriculture.model.SysDevice;
-import yuan.xu.intelligence_agriculture.service.SysDeviceService;
+import yuan.xu.intelligence_agriculture.model.SysControlDevice;
+import yuan.xu.intelligence_agriculture.model.SysSensorDevice;
+import yuan.xu.intelligence_agriculture.service.SysControlDeviceService;
+import yuan.xu.intelligence_agriculture.service.SysSensorDeviceService;
 import yuan.xu.intelligence_agriculture.websocket.WebSocketServer;
 
 import java.util.HashMap;
@@ -23,13 +25,13 @@ import java.util.Map;
 public class DeviceStatusTask {
 
     @Autowired
-    private RedisTemplate<String, Object> redisTemplate;
+    private SysControlDeviceService sysControlDeviceService;
 
     @Autowired
-    private SysDeviceService sysDeviceService;
+    private SysSensorDeviceService sysSensorDeviceService;
 
-    private static final String DEVICE_LAST_ACTIVE_KEY = "iot:device:active:";
-    private static final String DEVICE_ONLINE_STATUS_KEY = "iot:device:online_status";
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
 
     /**
      * 上一次的状态快照，用于对比是否发生变化
@@ -38,49 +40,60 @@ public class DeviceStatusTask {
 
     /**
      * 每 2 秒执行一次状态检查
+     * 检查对应的采集设备的在线状态,发生变更推送给前端
      */
     @Scheduled(fixedRate = 2000)
     public void checkDeviceStatus() {
-        // 1. 获取所有设备列表
-        List<SysDevice> devices = sysDeviceService.list();
+        // 1. 获取所有设备列表（从缓存获取，避免数据库压力）
+        List<SysControlDevice> controlDevices = sysControlDeviceService.listAllDevicesFromCache();
+        List<SysSensorDevice> sensorDevices = sysSensorDeviceService.listAllDevicesFromCache();
+        
         Map<String, Integer> currentStatusMap = new HashMap<>();
 
         long currentTime = System.currentTimeMillis();
 
-        for (SysDevice device : devices) {
+        // 处理控制设备
+        for (SysControlDevice device : controlDevices) {
             String deviceCode = device.getDeviceCode();
-            // 2. 从 Redis 获取最后活跃时间
-            Object lastActiveObj = redisTemplate.opsForValue().get(DEVICE_LAST_ACTIVE_KEY + deviceCode);
-            // 默认值
-            int isOnline = 0; // 默认离线
-            if (lastActiveObj != null) {
-                long lastActiveTime = Long.parseLong(lastActiveObj.toString());
-                // 3. 判断逻辑：如果当前时间与最后活跃时间间隔小于 6000ms (6秒)，则认为在线
-                if (currentTime - lastActiveTime < 6000) {
-                    isOnline = 1;
+            String key = "iot:device:active:" + deviceCode;
+            Object lastActive = redisTemplate.opsForValue().get(key);
+
+            int status = 0;
+            if (lastActive != null) {
+                long lastTime = Long.parseLong(lastActive.toString());
+                if (currentTime - lastTime < 6000) {
+                    status = 1;
                 }
             }
-            
-            currentStatusMap.put(deviceCode, isOnline);
+            currentStatusMap.put(deviceCode, status);
         }
 
-        // 4. 将汇总后的状态存入 Redis Hash 中
-        redisTemplate.opsForHash().putAll(DEVICE_ONLINE_STATUS_KEY, currentStatusMap);
-        
-        // 5. 如果状态发生了变化，或者这是第一次运行，则通过 WebSocket 推送给前端
-        if (!currentStatusMap.equals(lastStatusMap)) {
-            log.info("设备在线状态发生变化，触发 WebSocket 推送: {}", currentStatusMap);
-            
-            Map<String, Object> wsMessage = new HashMap<>();
-            wsMessage.put("type", "DEVICE_STATUS");
-            wsMessage.put("data", currentStatusMap);
-            
-            WebSocketServer.sendInfo(JSONUtil.toJsonStr(wsMessage));
-            
-            // 更新快照
-            lastStatusMap = new HashMap<>(currentStatusMap);
+        // 处理采集设备
+        for (SysSensorDevice device : sensorDevices) {
+            String deviceCode = device.getDeviceCode();
+            String key = "iot:device:active:" + deviceCode;
+            Object lastActive = redisTemplate.opsForValue().get(key);
+
+            int status = 0;
+            if (lastActive != null) {
+                long lastTime = Long.parseLong(lastActive.toString());
+                if (currentTime - lastTime < 6000) {
+                    status = 1;
+                }
+            }
+            currentStatusMap.put(deviceCode, status);
         }
-        
-        log.debug("设备在线状态检查完成");
+
+        // 4. 如果状态发生了变化，或者这是第一次运行，则通过 WebSocket 推送给前端
+        if (!currentStatusMap.equals(lastStatusMap)) {
+            lastStatusMap = new HashMap<>(currentStatusMap);
+            
+            Map<String, Object> message = new HashMap<>();
+            message.put("type", "DEVICE_STATUS");
+            message.put("data", currentStatusMap);
+            
+            WebSocketServer.sendInfo(JSONUtil.toJsonStr(message));
+            log.info("设备在线状态发生变化，已推送至前端: {}", currentStatusMap);
+        }
     }
 }

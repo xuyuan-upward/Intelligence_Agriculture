@@ -1,4 +1,4 @@
-package yuan.xu.intelligence_agriculture.model;
+package yuan.xu.intelligence_agriculture.req;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -13,20 +13,13 @@ import java.util.Date;
  * 对应数据库表 iot_sensor_data，存储六大环境指标的实时采集数值
  */
 @Data
-@TableName("iot_sensor_data")
-public class IotSensorData implements Serializable {
+public class IotSensorDataResp implements Serializable {
     private static final long serialVersionUID = 1L;
 
     /**
-     * 主键ID，自增
+     * 设备编号（所属网关）
      */
-    @TableId(value = "id", type = IdType.AUTO)
-    private Long id;
-
-    /**
-     * 所属环境编码
-     */
-    private String greenhouseEnvCode;
+    private String deviceCode;
 
     /**
      * 空气温度
