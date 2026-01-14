@@ -1,2 +1,37 @@
+server:
+  port: 8080
 
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/intelligence_agriculture?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai
+    username: root
+    password: password
+  redis:
+    host: localhost
+    port: 6379
+    password:
+    database: 0
+    lettuce:
+      pool:
+        max-active: 8
+        max-idle: 8
+        min-idle: 0
+  mvc:
+    pathmatch:
+      matching-strategy: ant_path_matcher
 
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: yuan.xu.intelligence_agriculture.model
+  configuration:
+    map-underscore-to-camel-case: true
+
+logging:
+  level:
+    root: INFO
+    yuan.xu.intelligence_agriculture: DEBUG
+
+ai:
+  service:
+    url: http://localhost:5000/predict
