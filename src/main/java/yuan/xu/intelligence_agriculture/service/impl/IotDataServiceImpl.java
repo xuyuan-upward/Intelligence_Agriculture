@@ -1,31 +1,28 @@
 package yuan.xu.intelligence_agriculture.service.impl;
 
-import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.redis.core.RedisTemplate;
 import yuan.xu.intelligence_agriculture.dto.SensorData;
-import yuan.xu.intelligence_agriculture.dto.SensorDataDTO;
-import yuan.xu.intelligence_agriculture.enums.EnvParameterType;
+import yuan.xu.intelligence_agriculture.dto.SensorDataBO;
 import yuan.xu.intelligence_agriculture.model.IotSensorData;
 import yuan.xu.intelligence_agriculture.mapper.IotSensorDataMapper;
 import yuan.xu.intelligence_agriculture.service.IotDataService;
 import yuan.xu.intelligence_agriculture.service.SysControlDeviceService;
-import yuan.xu.intelligence_agriculture.websocket.WebSocketServer;
 
 import java.math.BigDecimal;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static yuan.xu.intelligence_agriculture.enums.EnvParameterType.*;
+import static yuan.xu.intelligence_agriculture.key.RedisKey.DEVICE_LAST_ACTIVE_KEY;
+import static yuan.xu.intelligence_agriculture.websocket.WebSocketServer.WebSocketSendInfo;
 
 /**
  * 传感器数据处理业务实现类
@@ -41,92 +38,130 @@ public class IotDataServiceImpl extends ServiceImpl<IotSensorDataMapper, IotSens
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
-    /**
-     * Redis 中存储设备最后在线时间的 Key 前缀
-     */
-     static final String DEVICE_LAST_ACTIVE_KEY = "iot:device:active:";
+    // 用来展示存放对应的2s上传的数据,{1}分钟后存储到对应的数据库
+    private final List<IotSensorData> iotSensorDataList = new ArrayList<>();
+
 
     /**
      * 处理从 MQTT 接收到的传感器数据
+     *
      * @param payload 原始 MQTT 消息内容（JSON 格式）
      */
     @Override
+    @Async
     @Transactional(rollbackFor = Exception.class)
     public void processSensorData(String payload) {
         log.info("开始处理 MQTT 传感器数据: {}", payload);
         try {
-            // 1. 解析 JSON 数据为 DTO 对象
+            /// 1. 解析 JSON 数据为 DTO 对象
             if (!JSONUtil.isTypeJSON(payload)) {
                 log.warn("非法数据格式，忽略处理: {}", payload);
                 return;
             }
-            SensorDataDTO dto = JSONUtil.toBean(payload, SensorDataDTO.class);
-            
-            // 2. 更新采集设备在线状态到 Redis
+            SensorDataBO dto = JSONUtil.toBean(payload, SensorDataBO.class);
             String greenhouseEnvCode = dto.getGreenhouseEnvCode();
             List<SensorData> sensorDataList = dto.getSensorDataList();
+
             if (dto.getGreenhouseEnvCode() != null) {
-                String envCode = dto.getGreenhouseEnvCode();
-                long now = System.currentTimeMillis();
-                IotSensorData data = new IotSensorData();
-                data.setGreenhouseEnvCode(envCode);
-                data.setCreateTime(new Date());
-                // 根据对应的类型,抽象出来对应的类,方便后续的赋值
-                for (SensorData sensorData : sensorDataList) {
-                    String deviceCode = sensorData.getDeviceCode();
-                    Integer type = sensorData.getEnvParameterType();
-                    BigDecimal value = sensorData.getData() != null ? new BigDecimal(sensorData.getData()) : null;
-                    // 更新每个采集传感器的独立在线状态
-                    redisTemplate.opsForValue().set(DEVICE_LAST_ACTIVE_KEY + envCode + deviceCode, now, 10, TimeUnit.SECONDS);
-
-                    // 推送采集设备在线状态给前端
-                    Map<String, Object> sensorStatusMsg = new HashMap<>();
-                    sensorStatusMsg.put("type", "SENSOR_DEVICE_STATUS");
-                    Map<String, Object> sensorStatusData = new HashMap<>();
-                    sensorStatusData.put("deviceCode", deviceCode);
-                    sensorStatusData.put("onlineStatus", 1);
-                    sensorStatusMsg.put("data", sensorStatusData);
-                    WebSocketServer.sendInfo(JSONUtil.toJsonStr(sensorStatusMsg));
-                    
-                    if (type == null || value == null) continue;
-
-                    // 根据采集参数类型给对应的字段赋值
-                    if (AIR_TEMP.getEnvParameterType()==type){ data.setAirTemp(value);}
-
-                    else if (AIR_HUMIDITY.getEnvParameterType()==type){ data.setAirHumidity(value);} else if (SOIL_TEMP.getEnvParameterType() == type) {
-
-                        data.setSoilTemp(value);
-                    } else if (SOIL_HUMIDITY.getEnvParameterType() == type){ data.setSoilHumidity(value);}
-
-                    else if (CO2_CONCENTRATION.getEnvParameterType() == type){ data.setCo2Concentration(value);}
-
-                    else if (LIGHT_INTENSITY.getEnvParameterType() == type){ data.setLightIntensity(value);}
-
-                }
-
-                // todo 4. 持久化到数据库 有待优化:得进行批量插入
-                boolean saved = this.save(data);
-                if (!saved) {
-                    log.error("传感器数据保存数据库失败!");
-                    return;
-                }
-
-                // 5. 触发自动"控制"设备逻辑
-                Map<Integer, SensorData> integerSensorDataMap = sensorDataList.stream().collect(Collectors.toMap(SensorData::getEnvParameterType, sensorData -> sensorData));
-
-                sysControlDeviceService.checkAndAutoControl(data,integerSensorDataMap);
-
-                // 6. WebSocket 实时推送
-                HashMap<String, Object> wsMessage = new HashMap<>();
-                wsMessage.put("type", "SENSOR_DATA");
-                wsMessage.put("data", data);
-                WebSocketServer.sendInfo(JSONUtil.toJsonStr(wsMessage));
+                /// 2.保存采集的数据存储到数据库,并获取转型后的IotSensorData数据
+                IotSensorData data = buildIotSensorData(greenhouseEnvCode, sensorDataList);
                 
-                log.info("MQTT 传感器数据处理完成并已推送到 WebSocket 客户端");
+                /// 3. 批量持久化到数据库 (满30条保存一次)
+                List<IotSensorData> toSave = null;
+                synchronized (iotSensorDataList) {
+                    iotSensorDataList.add(data);
+                    if (iotSensorDataList.size() >= 30) {
+                        toSave = new ArrayList<>(iotSensorDataList);
+                        iotSensorDataList.clear();
+                    }
+                }
+                
+                if (toSave != null && !toSave.isEmpty()) {
+                    boolean saved = this.saveBatch(toSave);
+                    if (!saved) {
+                        log.error("批量保存传感器数据到数据库失败!");
+                    } else {
+                        log.info("批量保存传感器数据成功，条数: {}", toSave.size());
+                    }
+                }
+
+                // 4. 更新采集设备在线状态到 Redis
+                updateSensorOnlineStatus(greenhouseEnvCode, sensorDataList);
+
+                // 5. 触发自动"控制"设备逻辑 key:环境参数类型,value:传感器数据
+                Map<Integer, SensorData> integerSensorDataMap = sensorDataList.stream()
+                        .collect(Collectors.toMap(SensorData::getEnvParameterType, sensorData -> sensorData));
+                sysControlDeviceService.checkAndAutoControl(data, integerSensorDataMap);
+
+                // 6. WebSocket 实时推送采集的数据
+                WebSocketSendInfo("SENSOR_DATA", greenhouseEnvCode, data);
+                log.info("MQTT 传感器数据推送类型: {},环境类型:{},推送数据:{}", "SENSOR_DATA",
+                        dto.getGreenhouseEnvCode(), data);
             }
 
         } catch (Exception e) {
             log.error("处理传感器数据时发生异常", e);
         }
     }
+
+    private IotSensorData buildIotSensorData(String envCode, List<SensorData> sensorDataList) {
+        IotSensorData data = new IotSensorData();
+        data.setGreenhouseEnvCode(envCode);
+        data.setCreateTime(new Date());
+
+        for (SensorData sensorData : sensorDataList) {
+            Integer type = sensorData.getEnvParameterType();
+            BigDecimal value = sensorData.getData();
+            if (type == null || value == null) {
+                continue;
+            }
+
+            if (AIR_TEMP.getEnvParameterType().equals(type)) {
+                data.setAirTemp(value);
+            } else if (AIR_HUMIDITY.getEnvParameterType().equals(type)) {
+                data.setAirHumidity(value);
+            } else if (SOIL_TEMP.getEnvParameterType().equals(type)) {
+                data.setSoilTemp(value);
+            } else if (SOIL_HUMIDITY.getEnvParameterType().equals(type)) {
+                data.setSoilHumidity(value);
+            } else if (CO2_CONCENTRATION.getEnvParameterType().equals(type)) {
+                data.setCo2Concentration(value);
+            } else if (LIGHT_INTENSITY.getEnvParameterType().equals(type)) {
+                data.setLightIntensity(value);
+            }
+        }
+        return data;
+    }
+
+    /**
+     * 更新采集设备在线状态到 Redis
+     */
+    private void updateSensorOnlineStatus(
+            String greenhouseEnvCode,
+            List<SensorData> sensorDataList
+    ) {
+        if (greenhouseEnvCode == null || sensorDataList == null || sensorDataList.isEmpty()) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        HashMap<String, Object> sensorStatusMaps = new HashMap<>();
+
+        for (SensorData sensorData : sensorDataList) {
+            String deviceCode = sensorData.getDeviceCode();
+            if (deviceCode != null) {
+                sensorStatusMaps.put(deviceCode, now);
+            }
+        }
+
+        redisTemplate.opsForHash()
+                .putAll(DEVICE_LAST_ACTIVE_KEY + greenhouseEnvCode, sensorStatusMaps);
+        redisTemplate.expire(
+                DEVICE_LAST_ACTIVE_KEY + greenhouseEnvCode,
+                10,
+                TimeUnit.SECONDS
+        );
+    }
+
+
 }

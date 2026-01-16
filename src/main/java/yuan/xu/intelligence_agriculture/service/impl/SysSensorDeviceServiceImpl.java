@@ -9,11 +9,11 @@ import yuan.xu.intelligence_agriculture.mapper.SysSensorDeviceMapper;
 import yuan.xu.intelligence_agriculture.model.SysSensorDevice;
 import yuan.xu.intelligence_agriculture.service.SysSensorDeviceService;
 
-import javax.annotation.PostConstruct;
-import java.util.List;
-import java.util.concurrent.TimeUnit;
+import java.util.HashMap;
+import java.util.Map;
 
-import static yuan.xu.intelligence_agriculture.service.impl.IotDataServiceImpl.DEVICE_LAST_ACTIVE_KEY;
+import static yuan.xu.intelligence_agriculture.key.RedisKey.DEVICE_LAST_ACTIVE_KEY;
+
 
 /**
  * 采集设备管理业务实现类
@@ -25,43 +25,47 @@ public class SysSensorDeviceServiceImpl extends ServiceImpl<SysSensorDeviceMappe
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
-    private static final String ALL_SENSOR_DEVICES_KEY = "iot:all_sensor_devices";
+//
+//    @PostConstruct
+//    public void init() {
+//        refreshAllDeviceCache();
+//
+//    }
+//
 
-    @PostConstruct
-    public void init() {
-        refreshAllDeviceCache();
-    }
-
-    private void refreshAllDeviceCache() {
-        List<SysSensorDevice> list = this.list();
-        redisTemplate.delete(ALL_SENSOR_DEVICES_KEY);
-        if (!list.isEmpty()) {
-            redisTemplate.opsForValue().set(ALL_SENSOR_DEVICES_KEY, list, 24, TimeUnit.HOURS);
-        }
-        log.info("Redis 全量采集设备缓存已刷新，当前设备总数: {}", list.size());
-    }
-
+    /**
+     * 判断对应采集设备状态是否离线,并获取判断后的所有设备状态
+     * @return
+     */
     @Override
-    @SuppressWarnings("unchecked")
-    public List<SysSensorDevice> listAllDevicesFromCache() {
-        List<SysSensorDevice> list = (List<SysSensorDevice>) redisTemplate.opsForValue().get(ALL_SENSOR_DEVICES_KEY);
-        if (list == null || list.isEmpty()) {
-            refreshAllDeviceCache();
-            list = this.list();
+    public Map<String, Integer> listAllDevicesStatus(String greenHouseCode) {
+        Map<String,  Map<Object, Object> > map = new HashMap<>();
+        // todo 后续加envCode
+        Map<Object, Object> lastActiveMap = redisTemplate.opsForHash().entries(DEVICE_LAST_ACTIVE_KEY + greenHouseCode);
+        Map<String, Integer> statusMap = new HashMap<>();
+        if (lastActiveMap == null || lastActiveMap.isEmpty()) {
+            return statusMap;
         }
 
-        if (list != null) {
-            long currentTime = System.currentTimeMillis();
-            for (SysSensorDevice device : list) {
-                String key = DEVICE_LAST_ACTIVE_KEY + device.getDeviceCode();
-                Object lastActive = redisTemplate.opsForValue().get(key);
-                if (lastActive != null && (currentTime - Long.parseLong(lastActive.toString()) < 6000)) {
-                    device.setOnlineStatus(1);
-                } else {
-                    device.setOnlineStatus(0);
+        long now = System.currentTimeMillis();
+        for (Map.Entry<Object, Object> entry : lastActiveMap.entrySet()) {
+            String deviceCode = entry.getKey() == null ? null : entry.getKey().toString();
+            if (deviceCode == null || deviceCode.trim().isEmpty()) {
+                continue;
+            }
+            long lastActiveMs = 0L;
+            Object v = entry.getValue();
+            if (v instanceof Number) {
+                lastActiveMs = ((Number) v).longValue();
+            } else if (v != null) {
+                try {
+                    lastActiveMs = Long.parseLong(v.toString());
+                } catch (Exception ignored) {
+                    lastActiveMs = 0L;
                 }
             }
+            statusMap.put(deviceCode, (lastActiveMs > 0 && now - lastActiveMs < 6000) ? 1 : 0);
         }
-        return list;
+        return statusMap;
     }
 }

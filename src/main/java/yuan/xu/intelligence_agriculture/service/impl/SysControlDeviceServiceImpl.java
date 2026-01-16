@@ -2,23 +2,25 @@ package yuan.xu.intelligence_agriculture.service.impl;
 
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import yuan.xu.intelligence_agriculture.dto.SensorData;
-import yuan.xu.intelligence_agriculture.enums.ControlStatus;
 import yuan.xu.intelligence_agriculture.mapper.SysControlDeviceMapper;
 import yuan.xu.intelligence_agriculture.mapper.SysControlLogMapper;
+import yuan.xu.intelligence_agriculture.mapper.SysEnvThresholdMapper;
 import yuan.xu.intelligence_agriculture.model.IotSensorData;
 import yuan.xu.intelligence_agriculture.model.SysControlDevice;
 import yuan.xu.intelligence_agriculture.model.SysControlLog;
 import yuan.xu.intelligence_agriculture.model.SysEnvThreshold;
 import yuan.xu.intelligence_agriculture.mqtt.MqttGateway;
+import yuan.xu.intelligence_agriculture.req.DeviceModeReq;
+import yuan.xu.intelligence_agriculture.req.DeviceModeReqs;
 import yuan.xu.intelligence_agriculture.service.SysControlDeviceService;
 import yuan.xu.intelligence_agriculture.service.SysEnvThresholdService;
-import yuan.xu.intelligence_agriculture.websocket.WebSocketServer;
 
 import javax.annotation.PostConstruct;
 import java.math.BigDecimal;
@@ -29,8 +31,9 @@ import java.util.stream.Collectors;
 import static yuan.xu.intelligence_agriculture.enums.ControlStatus.OFF;
 import static yuan.xu.intelligence_agriculture.enums.ControlStatus.ON;
 import static yuan.xu.intelligence_agriculture.enums.EnvParameterType.*;
-import static yuan.xu.intelligence_agriculture.service.impl.IotDataServiceImpl.DEVICE_LAST_ACTIVE_KEY;
-import static yuan.xu.intelligence_agriculture.service.impl.SysEnvThresholdServiceImpl.ALL_ENV_THRESHOLD_KEY;
+import static yuan.xu.intelligence_agriculture.key.EnvironmentKey.CONTROL;
+import static yuan.xu.intelligence_agriculture.key.RedisKey.*;
+import static yuan.xu.intelligence_agriculture.websocket.WebSocketServer.WebSocketSendInfo;
 
 /**
  * 控制设备管理与业务实现类
@@ -50,202 +53,320 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
 
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
+    @Autowired
+    private SysEnvThresholdMapper sysEnvThresholdMapper;
 
-    private static final String AUTO_DEVICE_KEY = "iot:auto_devices";
-    private static final String ALL_CONTROL_DEVICES_KEY = "iot:all_control_devices";
 
     @PostConstruct
     public void init() {
-        // 自懂控制的
-        refreshAutoDeviceCache();
+        // 自动控制设备缓存
+//        refreshAutoDeviceCache();
 //        refreshAllDeviceCache();
     }
 
-    private void refreshAllDeviceCache() {
-        List<SysControlDevice> list = this.list();
-        redisTemplate.delete(ALL_CONTROL_DEVICES_KEY);
+//    private void refreshAllDeviceCache() {
+//        List<SysControlDevice> list = this.list();
+//        redisTemplate.delete(ALL_CONTROL_DEVICES_KEY);
+//        if (!list.isEmpty()) {
+//            redisTemplate.opsForList().rightPushAll(ALL_CONTROL_DEVICES_KEY, list);
+//            // 2. 为整个列表设置过期时间（例如：1小时）
+//            redisTemplate.expire(ALL_CONTROL_DEVICES_KEY, 24, TimeUnit.HOURS);
+//        }
+//        log.info("Redis 全量控制设备缓存已刷新，当前设备总数: {}", list.size());
+//    }
+
+/*    // todo 后续可以实现某个控制设备开启自动,而不是开启自动模式后,所有设备都开启
+    private void refreshAutoDeviceCache(String envCode) {
+        // 获取某个环境下的自动控制模式下的所有设备
+        List<SysControlDevice> list = this.list(new LambdaQueryWrapper<SysControlDevice>()
+                .eq(SysControlDevice::getControlMode, 1).eq(SysControlDevice::getGreenhouseEnvCode, envCode));
+
+        redisTemplate.delete(AUTO_DEVICE_KEY + envCode);
         if (!list.isEmpty()) {
-            redisTemplate.opsForList().rightPushAll(ALL_CONTROL_DEVICES_KEY, list);
+            redisTemplate.opsForList().rightPushAll(AUTO_DEVICE_KEY + envCode, list);
             // 2. 为整个列表设置过期时间（例如：1小时）
-            redisTemplate.expire(ALL_CONTROL_DEVICES_KEY, 24, TimeUnit.HOURS);
+            redisTemplate.expire(AUTO_DEVICE_KEY + envCode, 24, TimeUnit.HOURS);
         }
-        log.info("Redis 全量控制设备缓存已刷新，当前设备总数: {}", list.size());
-    }
+        log.info("Redis 自动控制设备缓存已刷新，当前自动控制模式环境编码: {},设备数量: {}", envCode, list.size());
+    }*/
 
     // todo 后续可以实现某个控制设备开启自动,而不是开启自动模式后,所有设备都开启
-    private void refreshAutoDeviceCache() {
-        List<SysControlDevice> list = this.list(new LambdaQueryWrapper<SysControlDevice>()
-                .eq(SysControlDevice::getControlMode, 1));
+    private void refreshSingleAutoDeviceCache(String envCode, String deviceCode) {
+        // 获取某个环境下的自动控制模式下的所有设备
+        SysControlDevice sysControlDevice = this.baseMapper.selectOne(new LambdaQueryWrapper<SysControlDevice>()
+                .eq(SysControlDevice::getControlMode, 1)
+                .eq(SysControlDevice::getGreenhouseEnvCode, envCode)
+                .eq(SysControlDevice::getDeviceCode, deviceCode));
 
-        redisTemplate.delete(AUTO_DEVICE_KEY);
+        redisTemplate.delete(AUTO_DEVICE_KEY + envCode);
 
-        if (!list.isEmpty()) {
-            redisTemplate.opsForList().rightPushAll(AUTO_DEVICE_KEY, list);
+        if (sysControlDevice != null) {
+            redisTemplate.opsForList().rightPushAll(AUTO_DEVICE_KEY + envCode + deviceCode, sysControlDevice);
             // 2. 为整个列表设置过期时间（例如：1小时）
-            redisTemplate.expire(AUTO_DEVICE_KEY, 24, TimeUnit.HOURS);
+            redisTemplate.expire(AUTO_DEVICE_KEY + envCode, 24, TimeUnit.HOURS);
         }
-        log.info("Redis 自动控制设备缓存已刷新，当前自动模式设备数量: {}", list.size());
-    }
-
-
-
-    @Override
-    @SuppressWarnings("unchecked")
-    public List<SysControlDevice> listAllDevicesFromCache() {
-        List<SysControlDevice> list = (List<SysControlDevice>) redisTemplate.opsForValue().get(ALL_CONTROL_DEVICES_KEY);
-        if (list == null || list.isEmpty()) {
-            refreshAllDeviceCache();
-            list = this.list();
-        }
-
-        if (list != null) {
-            long currentTime = System.currentTimeMillis();
-            for (SysControlDevice device : list) {
-                String key = DEVICE_LAST_ACTIVE_KEY + device.getDeviceCode();
-                Object lastActive = redisTemplate.opsForValue().get(key);
-                if (lastActive != null && (currentTime - Long.parseLong(lastActive.toString()) < 6000)) {
-                    device.setOnlineStatus(1);
-                } else {
-                    device.setOnlineStatus(0);
-                }
-            }
-        }
-        return list;
+        log.info("Redis 自动控制设备缓存已刷新，当前自动控制模式环境编码: {},设备编码: {}", envCode, sysControlDevice.getDeviceCode());
     }
 
 
     /**
-     * 下发命令
-     * @param deviceId 对应的设备ID
+     * 下发命令&修改控制设备状态
+     *
+     * @param deviceCode 对应的设备唯一编码
      * @param status
+     * @param envCode
      */
     @Override
-    public void controlDevice(Long deviceId, Integer status) {
-        SysControlDevice device = this.getById(deviceId);
-        if (device == null) return;
+    public void controlDevice(String deviceCode, Integer status, String envCode) {
+        LambdaQueryWrapper<SysControlDevice> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(SysControlDevice::getDeviceCode, deviceCode);
+        SysControlDevice device = this.getOne(queryWrapper);
+        if (device == null) {
+            log.warn("未找到设备: {}", deviceCode);
+            return;
+        }
+        if (deviceCode == null || envCode == null || status == null) return;
         Map<String, Object> command = new HashMap<>();
-        command.put("deviceCode", device.getDeviceCode());
-        command.put("command", status == 1 ? "ON" : "OFF");
+        command.put("envCode", envCode);
+        command.put("deviceCode", deviceCode);
+        command.put("command", status);
         // 发送给MQTT
-        mqttGateway.sendToMqtt(JSONUtil.toJsonStr(command));
+        mqttGateway.sendToMqtt(JSONUtil.toJsonStr(command), CONTROL + envCode + "/" + deviceCode);
+
 
         SysControlLog logEntry = new SysControlLog();
-        logEntry.setDeviceId(deviceId);
-        logEntry.setOperationType(device.getControlMode() == 1 ? "AUTO" : "MANUAL");
-        logEntry.setOperationDesc((device.getControlMode() == 1 ? "自动" : "手动") + (status == 1 ? "开启" : "关闭") + device.getDeviceName());
+        logEntry.setDeviceCode(deviceCode);
+        logEntry.setOperationType(device.getControlMode());
         logEntry.setCreateTime(new Date());
-        sysControlLogMapper.insert(logEntry);
+        // todo 控制日志看是否要添加
+//        sysControlLogMapper.insert(logEntry);
 
         // 更新数据库中的设备状态
         device.setStatus(status);
         device.setUpdateTime(new Date());
         this.updateById(device);
 
-        if (device.getControlMode() == 1) {
-            refreshAutoDeviceCache();
-        }
-        // todo 对应的采集设备不需要关注
-//        refreshAllDeviceCache();
 
-        Map<String, Object> deviceUpdateMsg = new HashMap<>();
-        deviceUpdateMsg.put("type", "CONTROL_DEVICE_STATUS");
-        Map<String, Object> deviceData = new HashMap<>();
-        deviceData.put("deviceCode", device.getDeviceCode());
-        deviceData.put("status", status);
-        deviceUpdateMsg.put("data", deviceData);
-        WebSocketServer.sendInfo(JSONUtil.toJsonStr(deviceUpdateMsg));
-
-        Map<String, Object> logUpdateMsg = new HashMap<>();
-        logUpdateMsg.put("type", "SYSTEM_LOG");
-        Map<String, Object> logData = new HashMap<>();
-        logData.put("type", device.getControlMode() == 1 ? "success" : "primary");
-        logData.put("message", logEntry.getOperationDesc());
-        logData.put("source", device.getControlMode() == 1 ? "自动控制" : "手动控制");
-        logUpdateMsg.put("data", logData);
-        WebSocketServer.sendInfo(JSONUtil.toJsonStr(logUpdateMsg));
+        // todo 控制日志看后续完善
+        Map<String, Object> logDataMap = new HashMap<>();
+        logDataMap.put("type", device.getControlMode() == 1 ? "success" : "primary");
+        logDataMap.put("source", device.getControlMode() == 1 ? "自动控制" : "手动控制");
+        logDataMap.put("message", device.getDeviceName() + (status == 1 ? " 已开启" : " 已关闭"));
+        WebSocketSendInfo("SYSTEM_LOG", envCode, logDataMap);
     }
 
+    /**
+     * 更新某个环境的"单个"设备的控制模式
+     */
     @Override
-    public void updateMode(Long deviceId, Integer mode, BigDecimal min, BigDecimal max) {
-        SysControlDevice device = this.getById(deviceId);
-        if (device == null) return;
-        device.setControlMode(mode);
-        this.updateById(device);
-
-        // 如果有关联的阈值 ID，且提供了 min/max，则更新阈值表
-        if (device.getEnvThresholdId() != null && (min != null || max != null)) {
-            SysEnvThreshold threshold = sysEnvThresholdService.getById(device.getEnvThresholdId());
-            if (threshold != null) {
-                if (min != null) threshold.setMinValue(min);
-                if (max != null) threshold.setMaxValue(max);
-                sysEnvThresholdService.updateById(threshold);
-            }
+    public void updateSingleMode(DeviceModeReq req) {
+        Integer mode = req.getMode();
+        String deviceCode = req.getDeviceCode();
+        String envCode = req.getEnvCode();
+        boolean flag = this.update(
+                Wrappers.<SysControlDevice>lambdaUpdate()
+                        .eq(SysControlDevice::getDeviceCode, deviceCode)
+                        .eq(SysControlDevice::getGreenhouseEnvCode, envCode).set(SysControlDevice::getControlMode, mode)
+        );
+        if (!flag) {
+            return;
         }
-
-        refreshAutoDeviceCache();
-        refreshAllDeviceCache();
-
-        log.info("更新设备模式并同步 Redis 完成: 设备={}, 模式={}, 阈值范围=[{}, {}]", 
-                device.getDeviceName(), mode == 1 ? "自动" : "手动", min, max);
+        // 刷新的是哪个环境下的阈值模式
+        refreshSingleAutoDeviceCache(envCode, deviceCode);
+        log.info("更新单个设备模式并同步 Redis 完成: 设备={}, 模式={}",
+                deviceCode, mode == 1 ? "自动" : "手动");
     }
 
+    /**
+     * todo 目前用来整个环境的判断,后面降低自动模式粒度只对某个设备来判断的时候,可以舍弃
+     * @param envCode
+     * @return
+     */
+    private boolean envIsAuto(String envCode) {
+        String key = AUTO_MODE_KEY + envCode;
+        Integer mode = (Integer) redisTemplate.opsForValue().get(key);
+        if (mode != null) {
+            return mode == 1;
+        }
+        /// 获取自动控制的设备
+        List<SysControlDevice> devices = fromCacheGetControlDevices(envCode);
+        if (devices.isEmpty()) {
+            return false;
+        }
+        // 设定当前
+        redisTemplate.opsForValue().set(key, 1);
+        return true;
+    }
+
+    /**
+     * 获取是自动模式下的所有控制设备
+     * @param envCode
+     * @return
+     */
+    private List<SysControlDevice> fromCacheGetControlDevices(String envCode) {
+        String key = AUTO_DEVICE_KEY + envCode;
+        @SuppressWarnings("unchecked")
+        List<SysControlDevice> cache =
+                (List<SysControlDevice>) redisTemplate.opsForValue().get(key);
+
+        if (cache != null && !cache.isEmpty()) {
+            return cache;
+        }
+
+        List<SysControlDevice> list = this.list(
+                Wrappers.<SysControlDevice>lambdaQuery()
+                        .eq(SysControlDevice::getGreenhouseEnvCode, envCode)
+                        .eq(SysControlDevice::getControlMode, 1) // 自动控制模式的
+        );
+
+        redisTemplate.opsForValue().set(key, list);
+        redisTemplate.expire(key, 24, TimeUnit.HOURS);
+        return list;
+    }
+
+    /**
+     * 1. 检查控制模式  2.自动模式:触发对应的控制,并且将对应的控制设备状态推送给前端
+     * @param data
+     * @param integerSensorDataMap
+     */
     @Override
     @SuppressWarnings("unchecked")
     public void checkAndAutoControl(IotSensorData data, Map<Integer, SensorData> integerSensorDataMap) {
-        List<SysControlDevice> autoDeviceCache = (List<SysControlDevice>) redisTemplate.opsForValue().get(AUTO_DEVICE_KEY);
-        List<SysEnvThreshold> sysEnvThresholdList = (List<SysEnvThreshold>) redisTemplate.opsForValue().get(ALL_ENV_THRESHOLD_KEY);
+        String greenhouseEnvCode = data.getGreenhouseEnvCode();
+        // 1 是否自动 (决策入口)
+        if (!envIsAuto(greenhouseEnvCode)) {
+            return;
+        }
+        // 2 从缓存中拿控制
+        List<SysControlDevice> autoDeviceCache = fromCacheGetControlDevices(greenhouseEnvCode);
+        /**
+         * 3.获取当前环境下的环境阈值
+         * 用map来存储对应不同环境下的环境阈值,key根据不同环境来区分,filed:根据环境ID来区分,value:对应的整个环境阈值对象
+         * 为什么filed:根据环境ID来区分?因为对应的控制器只和对应的环境阈值挂钩,其中挂钩是靠:环境阈值ID
+         */
+        Map<Object, Object> map = redisTemplate.opsForHash().entries(ALL_ENV_THRESHOLD_KEY + data.getGreenhouseEnvCode());
+        HashMap<Long, SysEnvThreshold> sysEnvThresholdHashMap = new HashMap<>();
+        map.forEach((k, v) -> sysEnvThresholdHashMap.put(Long.valueOf((String) k), (SysEnvThreshold) v));
+        if (autoDeviceCache == null || autoDeviceCache.isEmpty() || sysEnvThresholdHashMap == null) {
+            return;
+        }
+        // key:控制设备编码 value:状态
+        // 更新前的
+        Map<String, Integer> BeforeUpdateControlStatusMap = autoDeviceCache.stream().collect(Collectors.toMap(SysControlDevice::getDeviceCode, SysControlDevice::getStatus));
+        // 更新后的
+        Map<String, Integer> AfterUpdateControlStatusMap = new HashMap<>(BeforeUpdateControlStatusMap);
+        for (SysControlDevice sysControlDevice : autoDeviceCache) {
+            autoControlOneDevice(sysControlDevice, data, integerSensorDataMap, sysEnvThresholdHashMap, AfterUpdateControlStatusMap);
+        }
 
-        if (autoDeviceCache == null || autoDeviceCache.isEmpty() || sysEnvThresholdList == null) {
+        // 统一推送设备状态变更
+        if (!AfterUpdateControlStatusMap.isEmpty() && !BeforeUpdateControlStatusMap.equals(AfterUpdateControlStatusMap)) {
+            // 刷新缓存
+            redisTemplate.delete(AUTO_DEVICE_KEY + data.getGreenhouseEnvCode());
+            WebSocketSendInfo("CONTROL_DEVICE_STATUS", greenhouseEnvCode, AfterUpdateControlStatusMap);
+            log.info("自动控制触发批量推送: 环境={}, 设备数={}", greenhouseEnvCode, AfterUpdateControlStatusMap.size());
+        }
+    }
+    /**
+     * 更新某个环境"所有"控制设备的控制模式
+     */
+    @Override
+    public void updatesDevicesMode(DeviceModeReqs reqs) {
+        Integer mode = reqs.getMode();
+        String envCode = reqs.getEnvCode();
+        List<SysControlDevice> sysControlDeviceList = this.list(
+                Wrappers.<SysControlDevice>lambdaQuery()
+                        .eq(SysControlDevice::getGreenhouseEnvCode, envCode)
+        );
+        if (sysControlDeviceList.isEmpty()) return;
+        for (SysControlDevice sysControlDevice : sysControlDeviceList) {
+            sysControlDevice.setControlMode(mode);
+        }
+        this.updateBatchById(sysControlDeviceList);
+        // 刷新的是哪个环境下的阈值模式
+        fromCacheGetControlDevices(envCode);
+        log.info("更新多个设备模式并同步 Redis 完成: 设备数量={}, 模式={}",
+                sysControlDeviceList.size(), mode == 1 ? "自动" : "手动");
+
+    }
+
+    /**
+     * 判断某个设备是否处于自动控制模式
+     */
+    private boolean deviceIsAuto(SysControlDevice device) {
+        return device.getControlMode() != null && device.getControlMode() == 1;
+    }
+
+    /**
+     * 单设备自动检查 + 控制
+     * @param device
+     * @param data
+     * @param sensorDataMap
+     * @param thresholdMap
+     */
+    private void autoControlOneDevice(SysControlDevice device,
+                                      IotSensorData data,
+                                      Map<Integer, SensorData> sensorDataMap,
+                                      Map<Long, SysEnvThreshold> thresholdMap,
+                                      Map<String, Integer> updatedDevices) {
+        // 设备不是自动模式，直接跳过
+        boolean deviceIsAuto = deviceIsAuto(device);
+        log.info("设备控制模式:{},设备控制名称:{}", deviceIsAuto == true ? "自动" : "手动",device.getDeviceName());
+        log.info("");
+        if (!deviceIsAuto) {
             return;
         }
 
-        // 转换为 Map<阈值ID, 阈值对象>
-        Map<Long, SysEnvThreshold> envThresholdMap = sysEnvThresholdList.stream()
-                .collect(Collectors.toMap(SysEnvThreshold::getId, t -> t, (e, r) -> e));
+        SysEnvThreshold threshold = thresholdMap.get(device.getEnvThresholdId());
+        if (threshold == null) return;
 
-        for (SysControlDevice sysControlDevice : autoDeviceCache) {
-            SysEnvThreshold threshold = envThresholdMap.get(sysControlDevice.getEnvThresholdId());
-            if (threshold == null) continue;
+        SensorData sensorData = sensorDataMap.get(threshold.getEnvParameterType());
+        if (sensorData == null || sensorData.getData() == null) return;
 
-            // 获取当前传感器数值
-            SensorData sensorData = integerSensorDataMap.get(threshold.getEnvParameterType());
-            if (sensorData == null || sensorData.getData() == null) continue;
+        BigDecimal currentVal = sensorData.getData();
+        BigDecimal min = threshold.getMinValue();
+        BigDecimal max = threshold.getMaxValue();
+        if (min == null || max == null) return;
 
-            BigDecimal currentVal = sensorData.getData();
-            BigDecimal min = threshold.getMinValue();
-            BigDecimal max = threshold.getMaxValue();
-            if (min == null || max == null) continue;
+        Integer typeCode = threshold.getEnvParameterType();
 
-            Integer typeCode = threshold.getEnvParameterType();
-            boolean shouldOpen = false;
-            boolean shouldClose = false;
+        boolean shouldOpen = false;
+        boolean shouldClose = false;
 
-            // 1. 低开高关类逻辑（加热、补光）：小于下限开启，大于下限关闭
-            if (AIR_TEMP.getEnvParameterType().equals(typeCode) || 
-                SOIL_TEMP.getEnvParameterType().equals(typeCode) || 
-                LIGHT_INTENSITY.getEnvParameterType().equals(typeCode)) {
-                if (currentVal.compareTo(min) < 0) shouldOpen = true;
-                else if (currentVal.compareTo(min) > 0) shouldClose = true;
-            } 
-            // 2. 高开低关类逻辑（排风、降碳）：大于上限开启，小于上限关闭
-            else if (AIR_HUMIDITY.getEnvParameterType().equals(typeCode) || 
-                     SOIL_HUMIDITY.getEnvParameterType().equals(typeCode) || 
-                     CO2_CONCENTRATION.getEnvParameterType().equals(typeCode)) {
-                if (currentVal.compareTo(max) > 0) shouldOpen = true;
-                else if (currentVal.compareTo(max) < 0) shouldClose = true;
-            }
+        // 低开高关（加热、补光）
+        if (AIR_TEMP.getEnvParameterType().equals(typeCode)
+                || SOIL_TEMP.getEnvParameterType().equals(typeCode)
+                || LIGHT_INTENSITY.getEnvParameterType().equals(typeCode)|| AIR_HUMIDITY.getEnvParameterType().equals(typeCode)
+                || SOIL_HUMIDITY.getEnvParameterType().equals(typeCode)) {
+            if (currentVal.compareTo(min) < 0) shouldOpen = true;
+            else if (currentVal.compareTo(min) > 0) shouldClose = true;
+        }
+        // 高开低关（排风、降碳,补水）
+        else if (
+               CO2_CONCENTRATION.getEnvParameterType().equals(typeCode)) {
 
-            // 执行开关动作（状态发生变化才执行）
-            if (shouldOpen && OFF.getCode().equals(sysControlDevice.getStatus())) {
-                log.info("【自动控制触发】指标类型: {}, 当前值: {}, 开启设备: {}",
-                        typeCode, currentVal, sysControlDevice.getDeviceName());
-                controlDevice(sysControlDevice.getId(), ON.getCode());
-            } else if (shouldClose && ON.getCode().equals(sysControlDevice.getStatus())) {
-                log.info("【自动控制触发】指标类型: {}, 当前值: {}, 关闭设备: {}",
-                        typeCode, currentVal, sysControlDevice.getDeviceName());
-                controlDevice(sysControlDevice.getId(), OFF.getCode());
-            }
+            if (currentVal.compareTo(max) > 0) shouldOpen = true;
+            else if (currentVal.compareTo(max) < 0) shouldClose = true;
+        }
+        
+        if (shouldOpen && OFF.getCode().equals(device.getStatus())) {
+            controlDevice(device.getDeviceCode(), ON.getCode(), device.getGreenhouseEnvCode());
+            // 更新当前对象状态并加入列表
+            device.setStatus(ON.getCode());
+            updatedDevices.put(device.getDeviceCode(), ON.getCode());
+            log.info("自动控制模式开启下:开启-设备{}, 当前值: {}",
+                    device.getDeviceName(),   currentVal);
+        } else if (shouldClose && ON.getCode().equals(device.getStatus())) {
+            controlDevice(device.getDeviceCode(), OFF.getCode(), device.getGreenhouseEnvCode());
+            // 更新当前对象状态并加入列表
+            device.setStatus(OFF.getCode());
+            // 把当前发生变更的状态放进去
+            updatedDevices.put(device.getDeviceCode(), OFF.getCode());
+            log.info("自动控制模式开启下:关闭-设备{}, 当前值: {}",
+                    device.getDeviceName(),   currentVal);
         }
     }
+
+
 
 }

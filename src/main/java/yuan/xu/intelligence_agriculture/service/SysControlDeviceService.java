@@ -4,9 +4,9 @@ import com.baomidou.mybatisplus.extension.service.IService;
 import yuan.xu.intelligence_agriculture.dto.SensorData;
 import yuan.xu.intelligence_agriculture.model.IotSensorData;
 import yuan.xu.intelligence_agriculture.model.SysControlDevice;
+import yuan.xu.intelligence_agriculture.req.DeviceModeReq;
+import yuan.xu.intelligence_agriculture.req.DeviceModeReqs;
 
-import java.math.BigDecimal;
-import java.util.List;
 import java.util.Map;
 
 public interface SysControlDeviceService extends IService<SysControlDevice> {
@@ -14,20 +14,28 @@ public interface SysControlDeviceService extends IService<SysControlDevice> {
     /**
      * 手动控制设备开关
      */
-    void controlDevice(Long deviceId, Integer status);
-    
+    void controlDevice(String deviceCode, Integer status, String envCode);
+
     /**
-     * 更新设备的控制模式及自动控制阈值
+     * 更新某个环境的"单个"设备的控制模式
      */
-    void updateMode(Long deviceId, Integer mode, BigDecimal min, BigDecimal max);
-    
+    void updateSingleMode(DeviceModeReq req);
+
     /**
      * 自动模式下的控制触发
      */
     void checkAndAutoControl(IotSensorData data, Map<Integer, SensorData> integerSensorDataMap);
 
+
     /**
-     * 获取所有控制设备（优先从缓存获取）
+     * 更新某个环境"所有"控制设备的控制模式
      */
-    List<SysControlDevice> listAllDevicesFromCache();
+    void updatesDevicesMode(DeviceModeReqs reqs);
+
+
+
+//    /**
+//     * 获取所有控制设备（优先从缓存获取）
+//     */
+//    List<SysControlDevice> listAllDevicesFromCache();
 }

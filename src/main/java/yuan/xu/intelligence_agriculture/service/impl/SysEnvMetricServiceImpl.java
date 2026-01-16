@@ -8,4 +8,5 @@ import yuan.xu.intelligence_agriculture.service.SysEnvMetricService;
 
 @Service
 public class SysEnvMetricServiceImpl extends ServiceImpl<SysEnvMetricMapper, SysEnvMetric> implements SysEnvMetricService {
+
 }

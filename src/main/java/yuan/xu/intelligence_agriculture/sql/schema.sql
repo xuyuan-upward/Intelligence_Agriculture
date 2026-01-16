@@ -16,19 +16,21 @@ create table sys_greenhouse (
 
 
 
--- 采集设备表
-create table sys_sensor_device (
-                                   id                  bigint auto_increment primary key comment '主键ID',
-                                   device_code         varchar(64) not null comment '采集设备编号',
-                                   device_name         varchar(100) comment '设备名称',
-                                   greenhouse_env_code            varchar(64) not null comment '所属环境',
-                                   update_time datetime default CURRENT_TIMESTAMP
-                                       on update CURRENT_TIMESTAMP,
-                                   create_time datetime default CURRENT_TIMESTAMP,
-
-                                   unique key uk_sensor_device (device_code),
-                                   key idx_env_code (greenhouse_env_code)
-) comment '采集设备表';
+-- auto-generated definition
+create table sys_sensor_device
+(
+    id                  bigint auto_increment comment '主键ID'
+        primary key,
+    device_code         varchar(64)                        not null comment '采集设备编号',
+    device_name         varchar(100)                       null comment '设备名称',
+    greenhouse_env_code varchar(64)                        not null comment '所属环境',
+    update_time         datetime default CURRENT_TIMESTAMP null on update CURRENT_TIMESTAMP,
+    create_time         datetime default CURRENT_TIMESTAMP null,
+    env_parameter_type  int      default 1                 null comment '''环境参数类型：1=空气温度, 2=空气湿度, 3=土壤温度, 4=土壤湿度, 5=CO2, 6=光照强度''',
+    constraint uk_sensor_device
+        unique (device_code)
+)
+    comment '采集设备表';
 
 
 

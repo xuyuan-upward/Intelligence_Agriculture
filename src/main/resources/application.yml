@@ -22,16 +22,28 @@ spring:
       matching-strategy: ant_path_matcher
 
 mybatis-plus:
-  mapper-locations: classpath*:/mapper/**/*.xml
+  mapper-locations: classpath:mapper/*.xml
   type-aliases-package: yuan.xu.intelligence_agriculture.model
   configuration:
     map-underscore-to-camel-case: true
+    # 使用 SLF4J 日志框架 (需配合 logging.level 配置使用)
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
 
 logging:
   level:
     root: INFO
-    yuan.xu.intelligence_agriculture: DEBUG
+    # 必须将 Mapper 接口所在包设置为 DEBUG 级别才能看到 SQL
+    yuan.xu.intelligence_agriculture.mapper: DEBUG
+    yuan.xu.intelligence_agriculture: INFO
 
 ai:
   service:
     url: http://localhost:5000/predict
+
+mqtt:
+  broker: ssl://i5548fc5.ala.cn-hangzhou.emqxsl.cn:8883
+  client-id: springboot_server
+  username: xuyuan
+  password: 12345678
+  topic: yuanxu/sensor/data
+  ca-file: emqxsl-ca.crt

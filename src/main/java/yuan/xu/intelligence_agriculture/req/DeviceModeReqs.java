@@ -1,26 +1,20 @@
 package yuan.xu.intelligence_agriculture.req;
 
 import lombok.Data;
-import java.math.BigDecimal;
 
 /**
- * 设备模式及阈值更新请求类
+ * 某个环境下所有设备模式更改请求类
  */
 @Data
-public class DeviceModeReq {
+public class DeviceModeReqs {
     /**
      * 环境编码(温室/区域)
      */
     private String envCode;
-    /**
-     * 控制设备编码
-     */
-    private String deviceCode;
+
     /**
      * 模式(0手动/1自动)
      */
     private Integer mode;
-
-
 
 }

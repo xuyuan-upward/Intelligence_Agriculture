@@ -1,8 +1,10 @@
 package yuan.xu.intelligence_agriculture.mqtt;
 
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.integration.annotation.ServiceActivator;
 import org.springframework.integration.channel.DirectChannel;
 import org.springframework.integration.core.MessageProducer;
@@ -14,6 +16,14 @@ import org.springframework.integration.mqtt.support.DefaultPahoMessageConverter;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessageHandler;
 
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.TrustManagerFactory;
+import java.io.InputStream;
+import java.security.KeyStore;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+
 /**
  * MQTT 配置类
  * 用于初始化 MQTT 客户端工厂、入站通道、出站通道及相关消息适配器
@@ -21,25 +31,70 @@ import org.springframework.messaging.MessageHandler;
 @Configuration
 public class MqttConfig {
 
-    // MQTT 代理服务器地址
-    private static final String MQTT_BROKER_URL = "tcp://broker.emqx.io:1883";
-    // 客户端 ID，使用时间戳保证唯一性
-    private static final String CLIENT_ID = "springboot_server";
-    // 传感器数据订阅主题
-    private static final String TOPIC_SENSOR = "sensor/data";
+    @Value("${mqtt.broker}")
+    private String brokerUrl;
+
+    @Value("${mqtt.client-id}")
+    private String clientId;
+
+    @Value("${mqtt.username}")
+    private String username;
+
+    @Value("${mqtt.password}")
+    private String password;
+
+    @Value("${mqtt.topic}")
+    private String topic;
+
+    @Value("${mqtt.ca-file}")
+    private String caFile;
 
     /**
      * 配置 MQTT 客户端工厂
      */
     @Bean
-    public MqttPahoClientFactory mqttClientFactory() {
+    public MqttPahoClientFactory mqttClientFactory() throws Exception {
         DefaultMqttPahoClientFactory factory = new DefaultMqttPahoClientFactory();
         MqttConnectOptions options = new MqttConnectOptions();
-        options.setServerURIs(new String[]{MQTT_BROKER_URL});
+        
+        options.setServerURIs(new String[]{brokerUrl});
+        options.setUserName(username);
+        options.setPassword(password.toCharArray());
+        options.setAutomaticReconnect(true);
         options.setCleanSession(true); // 设置是否清空会话
-        options.setKeepAliveInterval(60); // 设置心跳包发送间隔
+        options.setKeepAliveInterval(600); // 设置心跳包发送间隔
+        
+        // 配置 SSL/TLS
+        if (brokerUrl.startsWith("ssl://")) {
+            options.setSocketFactory(getSocketFactory(caFile));
+        }
+        
         factory.setConnectionOptions(options);
         return factory;
+    }
+
+    /**
+     * 加载 CA 证书并创建 SSLSocketFactory
+     */
+    private SSLSocketFactory getSocketFactory(String caFile) throws Exception {
+        CertificateFactory cf = CertificateFactory.getInstance("X.509");
+        ClassPathResource resource = new ClassPathResource(caFile);
+        
+        try (InputStream caInput = resource.getInputStream()) {
+            X509Certificate ca = (X509Certificate) cf.generateCertificate(caInput);
+            
+            KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
+            keyStore.load(null, null);
+            keyStore.setCertificateEntry("ca", ca);
+            
+            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            tmf.init(keyStore);
+            
+            SSLContext context = SSLContext.getInstance("TLS");
+            context.init(null, tmf.getTrustManagers(), null);
+            
+            return context.getSocketFactory();
+        }
     }
 
     /**
@@ -54,13 +109,20 @@ public class MqttConfig {
      * MQTT 入站消息适配器：订阅指定主题并将消息转发到入站通道
      */
     @Bean
-    public MessageProducer inbound() {
+    public MessageProducer inbound() throws Exception {
         MqttPahoMessageDrivenChannelAdapter adapter =
-                new MqttPahoMessageDrivenChannelAdapter(CLIENT_ID + "_inbound", mqttClientFactory(), TOPIC_SENSOR);
-        adapter.setCompletionTimeout(5000); // 连接超时时间
-        adapter.setConverter(new DefaultPahoMessageConverter()); // 默认的消息转换器
-        adapter.setQos(1); // 设置质量服务等级
-        adapter.setOutputChannel(mqttInputChannel()); // 设置输出通道
+                new MqttPahoMessageDrivenChannelAdapter(
+                        clientId + "_inbound_" + System.currentTimeMillis(),
+                        mqttClientFactory(),
+                        topic
+                );
+
+        DefaultPahoMessageConverter converter = new DefaultPahoMessageConverter();
+        converter.setPayloadAsBytes(false); // ⭐关键
+
+        adapter.setConverter(converter);
+        adapter.setQos(0);
+        adapter.setOutputChannel(mqttInputChannel());
         return adapter;
     }
 
@@ -77,9 +139,9 @@ public class MqttConfig {
      */
     @Bean
     @ServiceActivator(inputChannel = "mqttOutboundChannel")
-    public MessageHandler mqttOutbound() {
+    public MessageHandler mqttOutbound() throws Exception {
         MqttPahoMessageHandler messageHandler =
-                new MqttPahoMessageHandler(CLIENT_ID + "_outbound", mqttClientFactory());
+                new MqttPahoMessageHandler(clientId + "_outbound_" + System.currentTimeMillis(), mqttClientFactory());
         messageHandler.setAsync(true); // 设置异步发送
         messageHandler.setDefaultTopic("device/control"); // 默认下发控制的主题
         return messageHandler;

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="yuan.xu.intelligence_agriculture.mapper.SysEnvThresholdMapper">
+
+    <update id="batchUpdateEnvThreshold">
+        UPDATE sys_env_threshold
+        SET
+        max_value = CASE env_parameter_type
+        <foreach collection="list" item="item">
+            WHEN #{item.envParameterType} THEN #{item.max}
+        </foreach>
+        END,
+        min_value = CASE env_parameter_type
+        <foreach collection="list" item="item">
+            WHEN #{item.envParameterType} THEN #{item.min}
+        </foreach>
+        END,
+        update_time = NOW()
+        WHERE greenhouse_env_code = #{envCode}
+        AND env_parameter_type IN
+        <foreach collection="list" item="item" open="(" separator="," close=")">
+            #{item.envParameterType}
+        </foreach>
+    </update>
+
+</mapper>

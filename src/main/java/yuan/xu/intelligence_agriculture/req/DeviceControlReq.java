@@ -7,10 +7,17 @@ import lombok.Data;
  */
 @Data
 public class DeviceControlReq {
+
+
     /**
-     * 设备ID
+     * 环境编码(温室/区域)
      */
-    private Long deviceId;
+    private String envCode;
+
+    /**
+     * 设备唯一编码
+     */
+    private String deviceCode;
 
     /**
      * 目标状态(0关/1开)

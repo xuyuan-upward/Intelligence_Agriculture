@@ -25,20 +25,19 @@ public class SysControlLog implements Serializable {
     /**
      * 关联的设备ID
      */
-    private Long deviceId;
+    private String deviceCode;
 
     /**
      * 操作类型（MANUAL: 手动, AUTO: 自动）
      */
-    private String operationType;
-
-    /**
-     * 操作详细描述（如：自动开启1号水泵）
-     */
-    private String operationDesc;
+    private Integer operationType;
 
     /**
      * 操作发生时间
      */
     private Date createTime;
+    /**
+     * 操作更新
+     */
+    private Date updateTime;
 }

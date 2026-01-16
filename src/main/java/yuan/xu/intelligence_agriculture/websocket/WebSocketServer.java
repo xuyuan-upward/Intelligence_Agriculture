@@ -1,5 +1,6 @@
 package yuan.xu.intelligence_agriculture.websocket;
 
+import cn.hutool.json.JSONUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -9,6 +10,7 @@ import javax.websocket.OnOpen;
 import javax.websocket.Session;
 import javax.websocket.server.ServerEndpoint;
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 
 /**
@@ -55,8 +57,9 @@ public class WebSocketServer {
 
     /**
      * 实现服务器主动推送消息
+     * 加 synchronized 防止多线程并发发送导致 IllegalStateException
      */
-    public void sendMessage(String message) {
+    public synchronized void sendMessage(String message) {
         try {
             // getBasicRemote() 是同步发送，getAsyncRemote() 是异步发送
             this.session.getBasicRemote().sendText(message);
@@ -70,7 +73,6 @@ public class WebSocketServer {
      * @param message 发送的消息内容（JSON 字符串）
      */
     public static void sendInfo(String message) {
-        log.debug("推送实时消息到所有客户端: {}", message);
         for (WebSocketServer item : webSocketSet) {
             try {
                 item.sendMessage(message);
@@ -80,4 +82,22 @@ public class WebSocketServer {
             }
         }
     }
+
+    /**
+     * 推送不同类型的信息
+     * @param type
+     * @param greenhouseEnvCode
+     * @param data
+     */
+    public static void WebSocketSendInfo(String type, String greenhouseEnvCode, Object data) {
+        // 6. WebSocket 实时推送
+        HashMap<String, Object> wsMessage = new HashMap<>();
+        // 每一次推送都要实现对应的 => 1:推送类型 2:属于哪个环境的 3:对应的推送数据
+        wsMessage.put("type", type);
+        wsMessage.put("env", greenhouseEnvCode);
+        wsMessage.put("data", data);
+        WebSocketServer.sendInfo(JSONUtil.toJsonStr(wsMessage));
+        log.info("WebSocket给前端推送类型type:{},当前环境envCode:{},data:{}", type, greenhouseEnvCode, JSONUtil.toJsonStr(data));
+    }
+
 }

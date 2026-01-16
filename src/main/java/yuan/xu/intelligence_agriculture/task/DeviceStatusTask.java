@@ -1,20 +1,20 @@
 package yuan.xu.intelligence_agriculture.task;
 
-import cn.hutool.json.JSONUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import yuan.xu.intelligence_agriculture.model.SysControlDevice;
-import yuan.xu.intelligence_agriculture.model.SysSensorDevice;
+import yuan.xu.intelligence_agriculture.model.SysGreenhouse;
 import yuan.xu.intelligence_agriculture.service.SysControlDeviceService;
 import yuan.xu.intelligence_agriculture.service.SysSensorDeviceService;
-import yuan.xu.intelligence_agriculture.websocket.WebSocketServer;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import static yuan.xu.intelligence_agriculture.key.RedisKey.ALL_ENV_HOUSE;
+import static yuan.xu.intelligence_agriculture.websocket.WebSocketServer.WebSocketSendInfo;
 
 /**
  * 设备状态检查定时任务
@@ -36,7 +36,11 @@ public class DeviceStatusTask {
     /**
      * 上一次的状态快照，用于对比是否发生变化
      */
-    private Map<String, Integer> lastStatusMap = new HashMap<>();
+    private Map<String, Integer> lastControlStatusMap = new HashMap<>();
+    /**
+     * 上一次的采集设备状态快照，用于对比是否发生变化,key:环境envCode
+     */
+    private Map<String,Map<String, Integer>> lastAllSensorStatusMap = new HashMap<>();
 
     /**
      * 每 2 秒执行一次状态检查
@@ -44,42 +48,24 @@ public class DeviceStatusTask {
      */
     @Scheduled(fixedRate = 2000)
     public void checkDeviceStatus() {
-        long currentTime = System.currentTimeMillis();
-        
-        // 1. 处理采集设备在线状态
-        List<SysSensorDevice> sensorDevices = sysSensorDeviceService.listAllDevicesFromCache();
-        for (SysSensorDevice device : sensorDevices) {
-            String deviceCode = device.getDeviceCode();
-            int currentStatus = isDeviceOnline(deviceCode, currentTime);
-            
-            if (!Integer.valueOf(currentStatus).equals(lastStatusMap.get(deviceCode))) {
-                lastStatusMap.put(deviceCode, currentStatus);
-                sendDeviceStatusUpdate("SENSOR_DEVICE_STATUS", deviceCode, currentStatus);
+        // 推送采集设备在线状态给前端
+        /// 1.获取环境实例
+        List<SysGreenhouse> sysGreenhouseList = (List<SysGreenhouse>) redisTemplate.opsForValue().get(ALL_ENV_HOUSE);
+        for (SysGreenhouse sysGreenhouse : sysGreenhouseList) {
+            ///  2.判断对应采集设备状态是否离线,并获取判断后的所有设备状态
+            String envCode = sysGreenhouse.getEnvCode();
+            Map<String, Integer> sensorStatusMap = sysSensorDeviceService.listAllDevicesStatus(envCode);
+            if (sensorStatusMap == null) {
+                sensorStatusMap = new HashMap<>();
+            }
+            // 获取某个环境下的采集设备在线状态
+            Map<String, Integer> lastSensorStatusMap = lastAllSensorStatusMap.get(envCode);
+            if (!sensorStatusMap.equals(lastSensorStatusMap)) {
+                lastSensorStatusMap = new HashMap<>(sensorStatusMap);
+                lastAllSensorStatusMap.put(envCode, lastSensorStatusMap);
+                WebSocketSendInfo("SENSOR_DEVICE_STATUS", envCode, sensorStatusMap);
             }
         }
     }
 
-    private int isDeviceOnline(String deviceCode, long currentTime) {
-        String key = "iot:device:active:" + deviceCode;
-        Object lastActive = redisTemplate.opsForValue().get(key);
-        if (lastActive != null) {
-            long lastTime = Long.parseLong(lastActive.toString());
-            if (currentTime - lastTime < 10000) { // 10秒内有心跳则在线
-                return 1;
-            }
-        }
-        return 0;
-    }
-
-    private void sendDeviceStatusUpdate(String type, String deviceCode, int onlineStatus) {
-        Map<String, Object> message = new HashMap<>();
-        message.put("type", type);
-        Map<String, Object> data = new HashMap<>();
-        data.put("deviceCode", deviceCode);
-        data.put("onlineStatus", onlineStatus);
-        message.put("data", data);
-        
-        WebSocketServer.sendInfo(JSONUtil.toJsonStr(message));
-        log.info("设备[{}]在线状态变化: {}, 已推送至前端", deviceCode, onlineStatus == 1 ? "在线" : "离线");
-    }
 }

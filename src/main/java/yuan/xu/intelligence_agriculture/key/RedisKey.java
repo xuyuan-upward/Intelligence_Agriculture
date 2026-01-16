@@ -6,22 +6,32 @@ package yuan.xu.intelligence_agriculture.key;
 public class RedisKey {
 
     /**
-     * 价格区域自增编码
+     * Redis 中存储环境参数类型的 Key 前缀
      */
-    public static final String GOODS_PRICE_AREA_NO_KEY_PREFIX = "pos:goods:price:area:no:";
-
-    public static final String GOODS_RT_CLASS_PUSH_NO_KEY_PREFIX = "pos:goods:rt:class:push:no";
+    public static final String ALL_ENV_HOUSE = "iot:all_env_house:";
+    /**
+     * Redis 中存储采集设备最后在线时间的 Key 前缀
+     */
+    public  static final String DEVICE_LAST_ACTIVE_KEY = "iot:device:active:";
 
     /**
-     * 精品中药商品编码关系key
+     * Redis 中存储环境参数类型的 Key 前缀
      */
-    private static final String HIGH_QUALITY_CHINESE_MEDICINES = "pos:goods:high_quality_chinese_medicines_mapping:{goodsNo}";
+    public static final String ALL_ENV_THRESHOLD_KEY = "iot:all_env_thresholds:";
 
-    public static final String PICTURE_BELOW_PUSH_NO_KEY_PREFIX = "pos:goods:picture:below:push:no";
+    /**
+     * Redis 中存储控制设备 Key 前缀
+     */
+    public static final String AUTO_DEVICE_KEY = "iot:auto_devices:";
 
+    /**
+     * Redis 中存储控制模式 Key 前缀
+     */
+    public static final String AUTO_MODE_KEY = "iot:auto_mode:";
 
-    public static String getHighQualityTcmKey(String goodsNo) {
-        return HIGH_QUALITY_CHINESE_MEDICINES.replace("{goodsNo}", goodsNo);
-    }
+    /**
+     * Redis 中存储设备最后在线时间的 Key 前缀 todo 可能用不到,看后续项目
+     */
+    public static final String ALL_CONTROL_DEVICES_KEY = "iot:all_control_devices:";
 
 }
