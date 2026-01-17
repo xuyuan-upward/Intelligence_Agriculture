@@ -70,7 +70,7 @@ public class IotDataServiceImpl extends ServiceImpl<IotSensorDataMapper, IotSens
                 List<IotSensorData> toSave = null;
                 synchronized (iotSensorDataList) {
                     iotSensorDataList.add(data);
-                    if (iotSensorDataList.size() >= 30) {
+                    if (iotSensorDataList.size() == 1) {
                         toSave = new ArrayList<>(iotSensorDataList);
                         iotSensorDataList.clear();
                     }
