@@ -5,9 +5,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import yuan.xu.intelligence_agriculture.dto.CommonResult;
 import yuan.xu.intelligence_agriculture.model.IotSensorData;
+import yuan.xu.intelligence_agriculture.model.SysControlDevice;
 import yuan.xu.intelligence_agriculture.model.SysGreenhouse;
 import yuan.xu.intelligence_agriculture.req.*;
 import yuan.xu.intelligence_agriculture.resp.EnvThresholdResp;
+import yuan.xu.intelligence_agriculture.resp.IotSensorDataResp;
 import yuan.xu.intelligence_agriculture.service.*;
 
 import java.util.ArrayList;
@@ -46,11 +48,16 @@ public class ApiController {
     @GetMapping("/data/history")
     public CommonResult<List<IotSensorDataResp>> getHistoryData(String envCode) {
         List<IotSensorData> list = iotDataService.lambdaQuery()
+                .eq(IotSensorData::getGreenhouseEnvCode, envCode)
                 .orderByDesc(IotSensorData::getCreateTime)
                 .last("LIMIT 100")
                 .list();
         List<IotSensorDataResp> iotSensorDataRespList = new ArrayList<>();
-        BeanUtils.copyProperties(list,iotSensorDataRespList );
+        for (IotSensorData data : list) {
+            IotSensorDataResp item = new IotSensorDataResp();
+            BeanUtils.copyProperties(data, item);
+            iotSensorDataRespList.add(item);
+        }
         return CommonResult.success(iotSensorDataRespList);
     }
 
@@ -62,6 +69,19 @@ public class ApiController {
     public CommonResult<String> controlDevice(@RequestBody DeviceControlReq req) {
         sysControlDeviceService.controlDevice(req.getDeviceCode(), req.getStatus(),req.getEnvCode());
         return CommonResult.success("操作成功");
+    }
+
+    /**
+     * 获取某个环境下的所有控制设备
+     * @param envCode
+     * @return
+     */
+    @GetMapping("/device/list")
+    public CommonResult<List<SysControlDevice>> listControlDevices(@RequestParam String envCode) {
+        List<SysControlDevice> list = sysControlDeviceService.lambdaQuery()
+                .eq(SysControlDevice::getGreenhouseEnvCode, envCode)
+                .list();
+        return CommonResult.success(list);
     }
 
     /**

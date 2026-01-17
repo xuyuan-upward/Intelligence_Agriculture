@@ -32,6 +32,11 @@ public interface SysControlDeviceService extends IService<SysControlDevice> {
      */
     void updatesDevicesMode(DeviceModeReqs reqs);
 
+    /**
+     * 判断对应控制设备状态是否离线,并获取判断后的所有设备状态
+     */
+    Map<String, Integer> listAllDevicesStatus(String envCode);
+
 
 
 //    /**

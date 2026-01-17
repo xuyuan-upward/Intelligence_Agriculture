@@ -6,12 +6,15 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import yuan.xu.intelligence_agriculture.model.SysGreenhouse;
+import yuan.xu.intelligence_agriculture.resp.DeviceStatusResp;
 import yuan.xu.intelligence_agriculture.service.SysControlDeviceService;
 import yuan.xu.intelligence_agriculture.service.SysSensorDeviceService;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static yuan.xu.intelligence_agriculture.key.RedisKey.ALL_ENV_HOUSE;
 import static yuan.xu.intelligence_agriculture.websocket.WebSocketServer.WebSocketSendInfo;
@@ -34,9 +37,9 @@ public class DeviceStatusTask {
     private RedisTemplate<String, Object> redisTemplate;
 
     /**
-     * 上一次的状态快照，用于对比是否发生变化
+     * 上一次的状态快照，用于对比是否发生变化, key:环境envCode
      */
-    private Map<String, Integer> lastControlStatusMap = new HashMap<>();
+    private Map<String, Map<String, Integer>> lastAllControlStatusMap = new HashMap<>();
     /**
      * 上一次的采集设备状态快照，用于对比是否发生变化,key:环境envCode
      */
@@ -51,19 +54,22 @@ public class DeviceStatusTask {
         // 推送采集设备在线状态给前端
         /// 1.获取环境实例
         List<SysGreenhouse> sysGreenhouseList = (List<SysGreenhouse>) redisTemplate.opsForValue().get(ALL_ENV_HOUSE);
+        if (sysGreenhouseList == null) return;
+        
         for (SysGreenhouse sysGreenhouse : sysGreenhouseList) {
-            ///  2.判断对应采集设备状态是否离线,并获取判断后的所有设备状态
             String envCode = sysGreenhouse.getEnvCode();
+            
+            ///  2.判断对应采集设备状态是否离线
             Map<String, Integer> sensorStatusMap = sysSensorDeviceService.listAllDevicesStatus(envCode);
-            if (sensorStatusMap == null) {
-                sensorStatusMap = new HashMap<>();
-            }
-            // 获取某个环境下的采集设备在线状态
-            Map<String, Integer> lastSensorStatusMap = lastAllSensorStatusMap.get(envCode);
-            if (!sensorStatusMap.equals(lastSensorStatusMap)) {
-                lastSensorStatusMap = new HashMap<>(sensorStatusMap);
-                lastAllSensorStatusMap.put(envCode, lastSensorStatusMap);
-                WebSocketSendInfo("SENSOR_DEVICE_STATUS", envCode, sensorStatusMap);
+            if (sensorStatusMap == null) sensorStatusMap = new HashMap<>();
+            
+            Map<String, Integer> lastSensorMap = lastAllSensorStatusMap.get(envCode);
+            if (!sensorStatusMap.equals(lastSensorMap)) {
+                lastAllSensorStatusMap.put(envCode, new HashMap<>(sensorStatusMap));
+                List<DeviceStatusResp> dtoList = sensorStatusMap.entrySet().stream()
+                        .map(e -> new DeviceStatusResp(e.getKey(), e.getValue()))
+                        .collect(Collectors.toList());
+                WebSocketSendInfo("SENSOR_DEVICE_STATUS", envCode, dtoList);
             }
         }
     }

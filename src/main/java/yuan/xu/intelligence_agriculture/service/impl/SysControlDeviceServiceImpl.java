@@ -8,7 +8,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
+import yuan.xu.intelligence_agriculture.resp.DeviceStatusResp;
 import yuan.xu.intelligence_agriculture.dto.SensorData;
+import yuan.xu.intelligence_agriculture.resp.SystemLogResp;
 import yuan.xu.intelligence_agriculture.mapper.SysControlDeviceMapper;
 import yuan.xu.intelligence_agriculture.mapper.SysControlLogMapper;
 import yuan.xu.intelligence_agriculture.mapper.SysEnvThresholdMapper;
@@ -148,11 +150,11 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
 
 
         // todo 控制日志看后续完善
-        Map<String, Object> logDataMap = new HashMap<>();
-        logDataMap.put("type", device.getControlMode() == 1 ? "success" : "primary");
-        logDataMap.put("source", device.getControlMode() == 1 ? "自动控制" : "手动控制");
-        logDataMap.put("message", device.getDeviceName() + (status == 1 ? " 已开启" : " 已关闭"));
-        WebSocketSendInfo("SYSTEM_LOG", envCode, logDataMap);
+        SystemLogResp logDTO = new SystemLogResp();
+        logDTO.setType(device.getControlMode() == 1 ? "success" : "primary");
+        logDTO.setSource(device.getControlMode() == 1 ? "自动控制" : "手动控制");
+        logDTO.setMessage(device.getDeviceName() + (status == 1 ? " 已开启" : " 已关闭"));
+        WebSocketSendInfo("SYSTEM_LOG", envCode, logDTO);
     }
 
     /**
@@ -263,8 +265,15 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
         if (!AfterUpdateControlStatusMap.isEmpty() && !BeforeUpdateControlStatusMap.equals(AfterUpdateControlStatusMap)) {
             // 刷新缓存
             redisTemplate.delete(AUTO_DEVICE_KEY + data.getGreenhouseEnvCode());
-            WebSocketSendInfo("CONTROL_DEVICE_STATUS", greenhouseEnvCode, AfterUpdateControlStatusMap);
-            log.info("自动控制触发批量推送: 环境={}, 设备数={}", greenhouseEnvCode, AfterUpdateControlStatusMap.size());
+
+            // Convert Map to List of Objects for frontend
+            List<DeviceStatusResp> statusList = new ArrayList<>();
+            AfterUpdateControlStatusMap.forEach((k, v) -> {
+                statusList.add(new DeviceStatusResp(k, v));
+            });
+
+            WebSocketSendInfo("CONTROL_DEVICE_STATUS", greenhouseEnvCode, statusList);
+            log.info("自动控制触发批量推送: 环境={}, 设备数={}", greenhouseEnvCode, statusList.size());
         }
     }
     /**
@@ -366,6 +375,38 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
                     device.getDeviceName(),   currentVal);
         }
     }
+
+    @Override
+    public Map<String, Integer> listAllDevicesStatus(String envCode) {
+        Map<String, Integer> statusMap = new HashMap<>();
+        Map<Object, Object> lastActiveMap = redisTemplate.opsForHash().entries(DEVICE_LAST_ACTIVE_KEY + envCode);
+
+        if (lastActiveMap == null || lastActiveMap.isEmpty()) {
+            return statusMap;
+        }
+
+        long now = System.currentTimeMillis();
+        for (Map.Entry<Object, Object> entry : lastActiveMap.entrySet()) {
+            String deviceCode = entry.getKey() == null ? null : entry.getKey().toString();
+            if (deviceCode == null || deviceCode.trim().isEmpty()) {
+                continue;
+            }
+            long lastActiveMs = 0L;
+            Object v = entry.getValue();
+            if (v instanceof Number) {
+                lastActiveMs = ((Number) v).longValue();
+            } else if (v != null) {
+                try {
+                    lastActiveMs = Long.parseLong(v.toString());
+                } catch (Exception ignored) {
+                    lastActiveMs = 0L;
+                }
+            }
+            statusMap.put(deviceCode, (lastActiveMs > 0 && now - lastActiveMs < 6000) ? 1 : 0);
+        }
+        return statusMap;
+    }
+
 
 
 

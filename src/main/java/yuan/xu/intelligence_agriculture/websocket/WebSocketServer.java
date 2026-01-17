@@ -3,6 +3,7 @@ package yuan.xu.intelligence_agriculture.websocket;
 import cn.hutool.json.JSONUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import yuan.xu.intelligence_agriculture.resp.WebSocketPushResp;
 
 import javax.websocket.OnClose;
 import javax.websocket.OnError;
@@ -88,14 +89,11 @@ public class WebSocketServer {
      * @param type
      * @param greenhouseEnvCode
      * @param data
+     * @param <T> 数据类型
      */
-    public static void WebSocketSendInfo(String type, String greenhouseEnvCode, Object data) {
+    public static <T> void WebSocketSendInfo(String type, String greenhouseEnvCode, T data) {
         // 6. WebSocket 实时推送
-        HashMap<String, Object> wsMessage = new HashMap<>();
-        // 每一次推送都要实现对应的 => 1:推送类型 2:属于哪个环境的 3:对应的推送数据
-        wsMessage.put("type", type);
-        wsMessage.put("env", greenhouseEnvCode);
-        wsMessage.put("data", data);
+        WebSocketPushResp<T> wsMessage = new WebSocketPushResp<>(type, greenhouseEnvCode, data);
         WebSocketServer.sendInfo(JSONUtil.toJsonStr(wsMessage));
         log.info("WebSocket给前端推送类型type:{},当前环境envCode:{},data:{}", type, greenhouseEnvCode, JSONUtil.toJsonStr(data));
     }
