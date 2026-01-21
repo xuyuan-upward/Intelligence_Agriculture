@@ -1,5 +1,7 @@
 package yuan.xu.intelligence_agriculture.service;
 
+import yuan.xu.intelligence_agriculture.resp.AiAnalysisResp;
+
 public interface AiPredictionService {
-    String getPrediction();
+    AiAnalysisResp getPrediction(String envCode);
 }

@@ -32,16 +32,17 @@ public class RedisKey {
      * Redis 中存储某个环境实例下的 “控制模式” Key 前缀
      */
     public static final String AUTO_MODE_KEY = "iot:auto_mode:";
-    public static final String AUTO_DEVICE_LAST_ACTION_KEY = "iot:auto_devices:last_action:";
     /**
      * Redis 中存储某个环境实例下的每个 ”控制设备” 最近一次"开灯"时间的 Key 前缀
      */
+    ///  1.记录的是当前设备最近一次"开灯"时间
     public static final String AUTO_DEVICE_LIGHT_ON_UNTIL_KEY = "iot:auto_devices:light_on_until:";
+
+    ///  2.记录的是当前设备最近一次"光照强度低于最小值"的时间
     public static final String AUTO_DEVICE_LIGHT_LOW_SINCE_KEY = "iot:auto_devices:light_low_since:";
 
-    /**
-     * Redis 中存储某个环境实例下的所有 ”控制设备” 最后在线时间的 Key 前缀 todo 可能用不到,看后续项目
-     */
-    public static final String ALL_CONTROL_DEVICES_KEY = "iot:all_control_devices:";
+    public static final String AUTH_SMS_COOLDOWN_KEY = "auth:sms:cooldown:";
+    public static final String AUTH_SMS_CODE_KEY = "auth:sms:code:";
+
 
 }

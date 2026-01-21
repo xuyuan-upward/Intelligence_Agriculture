@@ -110,3 +110,7 @@ INSERT INTO sys_control_device (device_code, device_name, greenhouse_env_code, e
 SELECT 'C_HUMIDIFIER_001', '加湿器(DYY)', 'YuXuan', id, 0, 0, NOW(), NOW()
 FROM sys_env_threshold WHERE greenhouse_env_code = 'YuXuan' AND env_parameter_type = 2
 ON DUPLICATE KEY UPDATE device_name = VALUES(device_name);
+
+INSERT INTO sys_user (phone, username, password, role, create_time)
+VALUES ('18800000000', 'admin', '$2a$10$7EqJtq98hPqEX7fNZaFWoOaKjz3lS3Nwq2/0EHTe2x7U75iT4J8uW', 'ADMIN', NOW())
+ON DUPLICATE KEY UPDATE role = VALUES(role), username = VALUES(username);

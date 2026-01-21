@@ -2,7 +2,7 @@ package yuan.xu.intelligence_agriculture.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
-import org.springframework.data.repository.query.Param;
+import org.apache.ibatis.annotations.Param;
 import yuan.xu.intelligence_agriculture.model.SysEnvThreshold;
 import yuan.xu.intelligence_agriculture.req.EnvThresholdReq;
 

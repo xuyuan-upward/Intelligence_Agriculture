@@ -110,3 +110,13 @@ create table sys_control_log (
                                  create_time datetime default CURRENT_TIMESTAMP comment '操作时间'
 ) comment '设备控制日志表';
 
+create table sys_user (
+                          id bigint auto_increment primary key,
+                          phone varchar(32) not null,
+                          username varchar(64) not null,
+                          password varchar(255) not null,
+                          role varchar(32) not null,
+                          create_time datetime default CURRENT_TIMESTAMP,
+                          unique key uk_sys_user_phone (phone),
+                          unique key uk_sys_user_username (username)
+);

@@ -3,6 +3,7 @@ package yuan.xu.intelligence_agriculture.service.impl;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Async;
@@ -13,17 +14,21 @@ import yuan.xu.intelligence_agriculture.dto.SensorDataBO;
 import yuan.xu.intelligence_agriculture.mapper.IotSensorDataMapper;
 import yuan.xu.intelligence_agriculture.model.IotSensorData;
 import yuan.xu.intelligence_agriculture.model.SysEnvThreshold;
+import yuan.xu.intelligence_agriculture.req.AnalysisReq;
 import yuan.xu.intelligence_agriculture.resp.IotSensorDataListResp;
 import yuan.xu.intelligence_agriculture.resp.IotSensorDataResp;
+import yuan.xu.intelligence_agriculture.resp.IotSensorHistoryDataResp;
 import yuan.xu.intelligence_agriculture.service.IotDataService;
 import yuan.xu.intelligence_agriculture.service.SysControlDeviceService;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.stream.Collectors;
 
 import static yuan.xu.intelligence_agriculture.enums.EnvParameterType.*;
-import static yuan.xu.intelligence_agriculture.key.RedisKey.DEVICE_LAST_ACTIVE_KEY;
+import static yuan.xu.intelligence_agriculture.key.RedisKey.DEVICE_LAST_TIME_KEY;
 import static yuan.xu.intelligence_agriculture.key.RedisKey.ENV_THRESHOLD_KEY;
 import static yuan.xu.intelligence_agriculture.websocket.WebSocketServer.WebSocketSendInfo;
 
@@ -95,8 +100,8 @@ public class IotDataServiceImpl extends ServiceImpl<IotSensorDataMapper, IotSens
                 /// 5. 触发自动"控制"设备逻辑 key:环境参数类型,value:传感器数据
                 Map<Integer, SensorData> integerSensorDataMap = sensorDataList.stream()
                         .collect(Collectors.toMap(SensorData::getEnvParameterType, sensorData -> sensorData));
-                /// 6. 检查是否触发对应的自动控制，以及对应的控制设备是否需要"开启"，以及对应的当前采集的数据是否处于异常
 
+                /// 6. 检查是否触发对应的自动控制，以及对应的控制设备是否需要"开启"，以及对应的当前采集的数据是否处于异常
                 sysControlDeviceService.checkAndAutoControl(data, integerSensorDataMap);
 
                 /// 7. 构建 List<IotSensorDataListResp>
@@ -109,6 +114,45 @@ public class IotDataServiceImpl extends ServiceImpl<IotSensorDataMapper, IotSens
         } catch (Exception e) {
             log.error("处理传感器数据时发生异常", e);
         }
+    }
+
+    @Override
+    public List<IotSensorHistoryDataResp> getAnalysisData(AnalysisReq req) {
+        // 注：由于 Controller 层已进行严格的时间范围（6小时内）和时间点（6小时前）校验，
+        // 此处直接执行查询逻辑。
+
+        List<IotSensorData> list = this.lambdaQuery()
+                .eq(IotSensorData::getGreenhouseEnvCode, req.getEnvCode())
+                .ge(IotSensorData::getCreateTime, req.getStartTime())
+                .le(IotSensorData::getCreateTime, req.getEndTime())
+                .orderByAsc(IotSensorData::getCreateTime)
+                .list();
+
+        List<IotSensorHistoryDataResp> respList = new ArrayList<>();
+        for (IotSensorData data : list) {
+            IotSensorHistoryDataResp item = new IotSensorHistoryDataResp();
+            BeanUtils.copyProperties(data, item);
+            respList.add(item);
+        }
+        return respList;
+    }
+
+    @Override
+    public List<IotSensorHistoryDataResp> getHistoryData(String envCode) {
+        // 获取一小时前的时间点
+        LocalDateTime oneHourAgo = LocalDateTime.now().minusHours(1);
+        List<IotSensorData> list = this.lambdaQuery()
+                .eq(IotSensorData::getGreenhouseEnvCode, envCode)
+                .ge(IotSensorData::getCreateTime, oneHourAgo)
+                .orderByDesc(IotSensorData::getCreateTime)
+                .list();
+        List<IotSensorHistoryDataResp> respList = new ArrayList<>();
+        for (IotSensorData data : list) {
+            IotSensorHistoryDataResp item = new IotSensorHistoryDataResp();
+            BeanUtils.copyProperties(data, item);
+            respList.add(item);
+        }
+        return respList;
     }
 
     private IotSensorDataListResp buildIotSensorDataListResp(IotSensorData data, List<SensorData> sensorDataList, SensorDataBO sensorDataBO) {
@@ -209,7 +253,7 @@ public class IotDataServiceImpl extends ServiceImpl<IotSensorDataMapper, IotSens
         }
 
         redisTemplate.opsForHash()
-                .putAll(DEVICE_LAST_ACTIVE_KEY + greenhouseEnvCode, sensorStatusMaps);
+                .putAll(DEVICE_LAST_TIME_KEY + greenhouseEnvCode, sensorStatusMaps);
         // todo 先不设置过期时间
 //        redisTemplate.expire(
 //                DEVICE_LAST_ACTIVE_KEY + greenhouseEnvCode,

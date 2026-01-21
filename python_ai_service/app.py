@@ -15,6 +15,8 @@ MODEL_PATH = 'agriculture_model.pkl'
 
 # 需要预测的环境参数列表
 PARAMS = ['airTemp', 'airHumidity', 'soilTemp', 'soilHumidity', 'co2Concentration', 'lightIntensity']
+LAG_HOURS = [1, 2, 3, 6, 12, 24]
+ROLL_WINDOWS = [6, 12, 24]
 
 def train_dummy_model():
     """
@@ -35,15 +37,6 @@ def train_dummy_model():
     print("Dummy model trained and saved.")
     return model
 
-def load_model():
-    """
-    加载已有模型，如果不存在则训练一个新模型
-    """
-    if os.path.exists(MODEL_PATH):
-        return joblib.load(MODEL_PATH)
-    else:
-        return train_dummy_model()
-
 # 全局加载模型
 model_data = None
 
@@ -60,10 +53,11 @@ def create_features(df):
         df['hour_cos'] = np.cos(2 * np.pi * df['hour']/24.0)
     
     for param in PARAMS:
-        for lag in [1, 2, 3]:
+        for lag in LAG_HOURS:
             df[f'{param}_lag_{lag}'] = df[param].shift(lag)
-        df[f'{param}_roll_mean_6'] = df[param].rolling(window=6).mean()
-        df[f'{param}_roll_std_6'] = df[param].rolling(window=6).std()
+        for window in ROLL_WINDOWS:
+            df[f'{param}_roll_mean_{window}'] = df[param].rolling(window=window).mean()
+            df[f'{param}_roll_std_{window}'] = df[param].rolling(window=window).std()
     return df
 
 def load_model():
@@ -84,39 +78,35 @@ def load_model():
 # 初始化加载
 load_model()
 
-@app.route('/predict', methods=['POST'])
+@app.route('/predict', methods=['POST', 'GET'])
 def predict():
     """
     预测接口
-    接收最近的环境数据，返回未来12小时的预测趋势
+    返回未来12小时的预测趋势
     """
     try:
-        data = request.json
-        if not data:
-            return jsonify({"error": "No data provided"}), 400
-            
-        # 解析输入数据
-        df = pd.DataFrame(data)
-        if df.empty or len(df) < 1:
-             return jsonify({"error": "Insufficient data"}), 400
+        # 尝试获取输入数据，如果没有提供数据，则生成模拟/预测数据
+        data = request.json if request.is_json else None
+        
+        if data:
+            df = pd.DataFrame(data)
+            # 应用特征工程
+            df_featured = create_features(df)
+            # 获取最新的一行特征用于预测
+            latest_features_df = df_featured.tail(1)
+            X = []
+            for col in model_data['feature_cols']:
+                val = latest_features_df[col].iloc[0] if col in latest_features_df.columns else 0
+                if pd.isna(val): val = 0
+                X.append(float(val))
+            X = np.array(X).reshape(1, -1)
+            prediction_flat = model_data['model'].predict(X)[0]
+        else:
+            # 如果没有输入数据，直接返回基于模型或默认值的未来12小时预测
+            # 这里演示使用随机数或固定基准，实际可以连接数据库或读取最新状态
+            X_dummy = np.random.rand(1, len(model_data['feature_cols'])) * 50
+            prediction_flat = model_data['model'].predict(X_dummy)[0]
 
-        # 应用特征工程
-        df_featured = create_features(df)
-        
-        # 获取最新的一行特征用于预测
-        latest_features_df = df_featured.tail(1)
-        
-        # 提取模型需要的特征列 (处理缺失列，填充为0)
-        X = []
-        for col in model_data['feature_cols']:
-            val = latest_features_df[col].iloc[0] if col in latest_features_df.columns else 0
-            if pd.isna(val): val = 0
-            X.append(float(val))
-            
-        X = np.array(X).reshape(1, -1)
-        
-        # 预测未来 12 小时
-        prediction_flat = model_data['model'].predict(X)[0]
         prediction_reshaped = prediction_flat.reshape(12, len(PARAMS))
         
         # 构建响应数据

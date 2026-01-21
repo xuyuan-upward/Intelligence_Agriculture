@@ -27,7 +27,8 @@ import static yuan.xu.intelligence_agriculture.key.RedisKey.ENV_THRESHOLD_KEY;
 @Slf4j
 public class SysEnvThresholdServiceImpl extends ServiceImpl<SysEnvThresholdMapper, SysEnvThreshold> implements SysEnvThresholdService {
     @Autowired
-    private RedisTemplate<String, Object> redisTemplate;   @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
+    @Autowired
     private SysEnvThresholdMapper sysEnvThresholdMapper;
 
 
@@ -116,7 +117,7 @@ public class SysEnvThresholdServiceImpl extends ServiceImpl<SysEnvThresholdMappe
                                         .map(EnvThresholdReq::getEnvParameterType)
                                         .collect(Collectors.toList()))
         );
-        Map<Long, SysEnvThreshold> IdAndEnvThreshold = existingList.stream().collect(Collectors.toMap(SysEnvThreshold::getId, threshold -> threshold));
+        Map<String, SysEnvThreshold> IdAndEnvThreshold = existingList.stream().collect(Collectors.toMap( (val)-> val.getId().toString(), threshold -> threshold));
         redisTemplate.delete(ENV_THRESHOLD_KEY + req.getEnvCode());
         redisTemplate.opsForHash().putAll(ENV_THRESHOLD_KEY + req.getEnvCode(), IdAndEnvThreshold);
         redisTemplate.expire(ENV_THRESHOLD_KEY + req.getEnvCode(), 24, TimeUnit.HOURS);

@@ -45,9 +45,8 @@ import static yuan.xu.intelligence_agriculture.websocket.WebSocketServer.WebSock
 @Slf4j
 public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMapper, SysControlDevice> implements SysControlDeviceService {
 
-    private static final long MIN_AUTO_CONTROL_INTERVAL_MS = 120_000L;
-    private static final long LIGHT_ON_INTERVAL_MS = 120_000L;
-    private static final long LIGHT_LOW_MIN_DURATION_MS = 60_000L;
+    private static final long LIGHT_ON_INTERVAL_MS = 12_000L;
+    private static final long LIGHT_LOW_MIN_DURATION_MS = 5_000L;
     @Autowired
     private MqttGateway mqttGateway;
 
@@ -246,14 +245,13 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
     @Override
     public void checkAndAutoControl(IotSensorData data, Map<Integer, SensorData> integerSensorDataMap) {
         String greenhouseEnvCode = data.getGreenhouseEnvCode();
-        // 1 是否自动 (决策入口)
+        /// 1 是否自动 (决策入口)
         if (!envIsAuto(greenhouseEnvCode)) {
             return;
         }
-        // 2 从缓存中拿控制整个控制设备的信息
+        /// 2 从缓存中拿控制整个控制设备的信息
         List<SysControlDevice> autoDeviceCache = fromCacheGetControlDevices(greenhouseEnvCode);
 
-        // 2 从缓存中拿控制每个设备的状态
         /**
          * 3.获取当前环境下的环境阈值
          * 用map来存储对应不同环境下的环境阈值,key根据不同环境来区分,filed:根据环境ID来区分,value:对应的整个环境阈值对象
@@ -270,6 +268,7 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
         Map<String, Integer> BeforeUpdateControlStatusMap  = fromCacheGetControlDeviceStatus(greenhouseEnvCode,autoDeviceCache);
         // 更新后的
         Map<String, Integer> AfterUpdateControlStatusMap = new HashMap<>(BeforeUpdateControlStatusMap);
+        // 自动控制每个设备
         for (SysControlDevice sysControlDevice : autoDeviceCache) {
             autoControlOneDevice(sysControlDevice, data, integerSensorDataMap, sysEnvThresholdHashMap, AfterUpdateControlStatusMap);
         }
@@ -400,6 +399,7 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
                               BigDecimal min,
                               BigDecimal max,
                               SysControlDevice device) {
+        /// 处理光照特殊逻辑
         if (LIGHT_INTENSITY.getEnvParameterType().equals(typeCode)) {
             String env = device.getGreenhouseEnvCode();
             String lightKey = AUTO_DEVICE_LIGHT_ON_UNTIL_KEY + env;
@@ -408,14 +408,24 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
             Long lowSince = (Long) redisTemplate.opsForHash().get(lowSinceKey, device.getDeviceCode());
             long now = System.currentTimeMillis();
             if (currentVal.compareTo(min) < 0) {
+                // 光照值低于最小值，记录下当前时间光照强度低于的时间
                 if (lowSince == null) {
                     redisTemplate.opsForHash().put(lowSinceKey, device.getDeviceCode(), now);
                     return 0;
                 }
+                // 当前值和上次记录的光照强度低于的时间间隔小于最小持续时间，不开启
                 if (now - lowSince < LIGHT_LOW_MIN_DURATION_MS) {
                     return 0;
                 }
-                if (onUntil == null || now >= onUntil) {
+                // 当前值和上次记录的光照强度低于开始的时间间隔大于最小持续时间，开启补光
+                if (now - lowSince >= LIGHT_LOW_MIN_DURATION_MS && onUntil == null) {
+                    // 此时记录补光灯开启的时候的时间，下一次补光灯开启时间间隔为LIGHT_ON_INTERVAL_MS
+                    redisTemplate.opsForHash().put(lightKey, device.getDeviceCode(), now + LIGHT_ON_INTERVAL_MS);
+                    return 1;
+                }
+                // 补光灯开启时间已经满了，正常来说要给关闭补光灯了的，但是此时光照还是低于最小值，所以要继续开启补光灯
+                if (now >= onUntil && onUntil != null) {
+                    // 此时记录补光灯开启的时候的时间，下一次补光灯开启时间间隔为LIGHT_ON_INTERVAL_MS
                     redisTemplate.opsForHash().put(lightKey, device.getDeviceCode(), now + LIGHT_ON_INTERVAL_MS);
                     return 1;
                 }
@@ -433,13 +443,13 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
                 return -1;
             }
         }
-
+        /// 处理CO2浓度特殊逻辑
         if (CO2_CONCENTRATION.getEnvParameterType().equals(typeCode)) {
             if (currentVal.compareTo(max) > 0) return 1;
             else if (currentVal.compareTo(min) < 0) return -1;
             else return 0;
         }
-
+        /// 处理其他环境参数类型的逻辑
         if (currentVal.compareTo(min) < 0) return 1;
         else if (currentVal.compareTo(max) > 0) return -1;
         else return 0;

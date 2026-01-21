@@ -8,12 +8,15 @@ import yuan.xu.intelligence_agriculture.model.IotSensorData;
 import yuan.xu.intelligence_agriculture.model.SysControlDevice;
 import yuan.xu.intelligence_agriculture.model.SysGreenhouse;
 import yuan.xu.intelligence_agriculture.req.*;
+import yuan.xu.intelligence_agriculture.resp.AiAnalysisResp;
 import yuan.xu.intelligence_agriculture.resp.EnvThresholdResp;
 import yuan.xu.intelligence_agriculture.resp.IotSensorHistoryDataResp;
 import yuan.xu.intelligence_agriculture.service.*;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 
 /**
@@ -21,7 +24,7 @@ import java.util.List;
  * 提供传感器数据查询、设备控制、状态监控及 AI 预测等接口
  */
 @RestController
-@RequestMapping("/agriculture")
+@RequestMapping("/agriculture/device")
 @CrossOrigin(origins = "*")
 public class AgricultureController {
 
@@ -46,20 +49,42 @@ public class AgricultureController {
      */
     @GetMapping("/query/data/history")
     public CommonResult<List<IotSensorHistoryDataResp>> getHistoryData(@RequestParam String envCode) {
-        // 获取一小时前的时间点
-        LocalDateTime oneHourAgo = LocalDateTime.now().minusHours(1);
-        List<IotSensorData> list = iotDataService.lambdaQuery()
-                .eq(IotSensorData::getGreenhouseEnvCode, envCode)
-                .ge(IotSensorData::getCreateTime, oneHourAgo)
-                .orderByDesc(IotSensorData::getCreateTime)
-                .list();
-        List<IotSensorHistoryDataResp> iotSensorDataListRespList = new ArrayList<>();
-        for (IotSensorData data : list) {
-            IotSensorHistoryDataResp item = new IotSensorHistoryDataResp();
-            BeanUtils.copyProperties(data, item);
-            iotSensorDataListRespList.add(item);
+        return CommonResult.success(iotDataService.getHistoryData(envCode));
+    }
+
+    /**
+     * 获取历史工况分析数据
+     * 限制：
+     * 1. 只能查询最近 6 小时内的数据
+     * 2. 查询时间范围不得超过 6 小时
+     */
+    @PostMapping("/query/data/analysis")
+    public CommonResult<List<IotSensorHistoryDataResp>> getAnalysisData(@RequestBody AnalysisReq req) {
+        if (req.getEnvCode() == null || req.getStartTime() == null || req.getEndTime() == null) {
+            return CommonResult.failed("请求参数不完整");
         }
-        return CommonResult.success(iotSensorDataListRespList);
+
+        long startTime = req.getStartTime().getTime();
+        long endTime = req.getEndTime().getTime();
+        long now = System.currentTimeMillis();
+        long sixHoursMs = 6 * 60 * 60 * 1000;
+
+        // 1. 校验查询范围是否超过 6 小时
+        if (endTime - startTime > sixHoursMs) {
+            return CommonResult.failed("查询时间范围不能超过 6 小时");
+        }
+
+        // 2. 校验结束时间是否在未来 (允许查询最近的数据)
+        if (endTime > now + 60 * 1000) { // 稍微给点容错
+            return CommonResult.failed("不能查询未来的数据");
+        }
+
+        // 3. 校验开始时间是否早于结束时间
+        if (startTime >= endTime) {
+            return CommonResult.failed("开始时间必须早于结束时间");
+        }
+
+        return CommonResult.success(iotDataService.getAnalysisData(req));
     }
 
     /**
@@ -176,7 +201,7 @@ public class AgricultureController {
      * 调用内部 AI 服务根据历史环境数据生成建议
      */
     @GetMapping("/query/prediction")
-    public CommonResult<String> getPrediction() {
-        return CommonResult.success(aiPredictionService.getPrediction());
+    public CommonResult<AiAnalysisResp> getPrediction(@RequestParam String envCode) {
+        return CommonResult.success(aiPredictionService.getPrediction(envCode));
     }
 }
