@@ -5,6 +5,9 @@ import lombok.Data;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * 设备通过MQTT上传的数据类型
+ */
 @Data
 public class SensorDataBO {
     /**

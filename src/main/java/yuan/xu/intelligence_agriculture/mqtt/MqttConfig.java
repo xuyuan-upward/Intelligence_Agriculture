@@ -1,6 +1,7 @@
 package yuan.xu.intelligence_agriculture.mqtt;
 
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -15,6 +16,8 @@ import org.springframework.integration.mqtt.outbound.MqttPahoMessageHandler;
 import org.springframework.integration.mqtt.support.DefaultPahoMessageConverter;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessageHandler;
+import yuan.xu.intelligence_agriculture.model.SysGreenhouse;
+import yuan.xu.intelligence_agriculture.service.SysGreenhouseService;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocketFactory;
@@ -23,6 +26,8 @@ import java.io.InputStream;
 import java.security.KeyStore;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * MQTT 配置类
@@ -43,11 +48,23 @@ public class MqttConfig {
     @Value("${mqtt.password}")
     private String password;
 
-    @Value("${mqtt.topic}")
-    private String topic;
+    /**
+     * 传感器数据上行 Topic 前缀
+     */
+    @Value("${mqtt.data-topic}")
+    private String dataTopic;
+
+    /**
+     * 控制指令下行 Topic 前缀
+     */
+    @Value("${mqtt.control-topic}")
+    private String controlTopic;
 
     @Value("${mqtt.ca-file}")
     private String caFile;
+
+    @Autowired
+    private SysGreenhouseService sysGreenhouseService;
 
     /**
      * 配置 MQTT 客户端工厂
@@ -106,15 +123,36 @@ public class MqttConfig {
     }
 
     /**
-     * MQTT 入站消息适配器：订阅指定主题并将消息转发到入站通道
+     * MQTT 入站消息适配器：订阅所有环境的传感器数据主题并转发到入站通道
      */
     @Bean
     public MessageProducer inbound() throws Exception {
+        // 从数据库获取所有环境信息，动态构建订阅主题
+        List<SysGreenhouse> greenhouses = sysGreenhouseService.list();
+        List<String> topics = new ArrayList<>();
+
+        if (greenhouses != null && !greenhouses.isEmpty()) {
+            for (SysGreenhouse greenhouse : greenhouses) {
+                // 拼接主题: dataTopic/{envCode}
+                if (greenhouse.getEnvCode() != null && !greenhouse.getEnvCode().isEmpty()) {
+                    topics.add(dataTopic + "/" + greenhouse.getEnvCode());
+                }
+            }
+        }
+
+        // 如果没有环境信息，或者为了容错，可以添加一个默认主题
+        if (topics.isEmpty()) {
+            topics.add(dataTopic);
+        }
+
+        // 将 List 转换为数组
+        String[] topicArray = topics.toArray(new String[0]);
+
         MqttPahoMessageDrivenChannelAdapter adapter =
                 new MqttPahoMessageDrivenChannelAdapter(
                         clientId + "_inbound_" + System.currentTimeMillis(),
                         mqttClientFactory(),
-                        topic
+                        topicArray
                 );
 
         DefaultPahoMessageConverter converter = new DefaultPahoMessageConverter();
@@ -143,7 +181,7 @@ public class MqttConfig {
         MqttPahoMessageHandler messageHandler =
                 new MqttPahoMessageHandler(clientId + "_outbound_" + System.currentTimeMillis(), mqttClientFactory());
         messageHandler.setAsync(true); // 设置异步发送
-        messageHandler.setDefaultTopic("device/control"); // 默认下发控制的主题
+        messageHandler.setDefaultTopic(controlTopic); // 默认控制指令主题前缀
         return messageHandler;
     }
 }

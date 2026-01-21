@@ -40,7 +40,6 @@ public class SysSensorDeviceServiceImpl extends ServiceImpl<SysSensorDeviceMappe
     @Override
     public Map<String, Integer> listAllDevicesStatus(String greenHouseCode) {
         Map<String,  Map<Object, Object> > map = new HashMap<>();
-        // todo 后续加envCode
         Map<Object, Object> lastActiveMap = redisTemplate.opsForHash().entries(DEVICE_LAST_ACTIVE_KEY + greenHouseCode);
         Map<String, Integer> statusMap = new HashMap<>();
         if (lastActiveMap == null || lastActiveMap.isEmpty()) {

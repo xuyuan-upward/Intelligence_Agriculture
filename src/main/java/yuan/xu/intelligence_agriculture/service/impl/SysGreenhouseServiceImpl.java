@@ -6,19 +6,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import yuan.xu.intelligence_agriculture.mapper.SysGreenhouseMapper;
-import yuan.xu.intelligence_agriculture.model.SysEnvThreshold;
 import yuan.xu.intelligence_agriculture.model.SysGreenhouse;
-import yuan.xu.intelligence_agriculture.req.EnvThresholdReq;
 import yuan.xu.intelligence_agriculture.service.SysEnvThresholdService;
 import yuan.xu.intelligence_agriculture.service.SysGreenhouseService;
 
 import javax.annotation.PostConstruct;
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static yuan.xu.intelligence_agriculture.key.RedisKey.ALL_ENV_HOUSE;
-import static yuan.xu.intelligence_agriculture.key.RedisKey.ALL_ENV_THRESHOLD_KEY;
 
 @Service
 @Slf4j

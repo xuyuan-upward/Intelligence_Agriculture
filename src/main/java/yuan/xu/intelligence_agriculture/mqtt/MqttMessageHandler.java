@@ -3,6 +3,7 @@ package yuan.xu.intelligence_agriculture.mqtt;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.integration.annotation.ServiceActivator;
+import org.springframework.integration.mqtt.support.MqttHeaders;
 import org.springframework.messaging.MessageHandler;
 import org.springframework.stereotype.Service;
 import yuan.xu.intelligence_agriculture.service.IotDataService;
@@ -10,6 +11,7 @@ import yuan.xu.intelligence_agriculture.service.IotDataService;
 /**
  * MQTT 消息接收处理器
  * 负责监听入站通道并调用业务服务处理收到的原始数据
+ * 同时提取 Topic，便于区分不同环境的数据来源
  */
 @Service
 public class MqttMessageHandler {
@@ -28,8 +30,11 @@ public class MqttMessageHandler {
             try {
                 // 获取消息负载（Payload）
                 String payload = (String) message.getPayload();
-                // 调用业务层服务处理解析、存储及推送逻辑
-                iotDataService.processSensorData(payload);
+                // 获取消息订阅的主题（Topic）
+                String receivedTopic = (String) message.getHeaders().get(MqttHeaders.RECEIVED_TOPIC);
+                
+                // 调用业务层服务处理解析、存储及推送逻辑，同时传入 Topic 信息
+                iotDataService.processSensorData(payload, receivedTopic);
             } catch (Exception e) {
                 // 异常处理，防止由于单条消息处理失败导致适配器停止运行
                 e.printStackTrace();

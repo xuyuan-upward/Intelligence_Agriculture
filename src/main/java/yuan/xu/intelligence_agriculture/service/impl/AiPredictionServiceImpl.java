@@ -31,13 +31,9 @@ public class AiPredictionServiceImpl implements AiPredictionService {
                 .ge(IotSensorData::getCreateTime, sixHoursAgo)
                 .orderByAsc(IotSensorData::getCreateTime)
                 .list();
-        
-        Map<String, Object> param = new HashMap<>();
-        param.put("data", recentData);
-
         // 2. 调用 Python 接口
         try {
-            return HttpUtil.post(aiServiceUrl, JSONUtil.toJsonStr(param));
+            return HttpUtil.post(aiServiceUrl, JSONUtil.toJsonStr(recentData));
         } catch (Exception e) {
             e.printStackTrace();
             return "{\"error\": \"AI service unavailable\"}";

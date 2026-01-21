@@ -45,5 +45,7 @@ mqtt:
   client-id: springboot_server
   username: xuyuan
   password: 12345678
-  topic: yuanxu/sensor/data
   ca-file: emqxsl-ca.crt
+  data-topic: yuanxu/sensor/data
+  control-topic: yuanxu/sensor/control
+

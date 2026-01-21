@@ -14,42 +14,23 @@ public class IotSensorDataResp implements Serializable {
     private static final long serialVersionUID = 1L;
 
     /**
-     * 所属环境编码
+     * 环境参数类型 (1-6):其中
+     * 1, '空气温度',
+     * 2, '空气湿度',
+     * 3, '土壤温度',
+     * 4, '土壤湿度',
+     * 5, 'CO2浓度'
+     * 6, '光照强度',
      */
-    private String greenhouseEnvCode;
+    private Integer envParameterType;
 
     /**
-     * 空气温度
+     * 采集的数值
      */
-    private BigDecimal airTemp;
+    private BigDecimal dataValue = new BigDecimal(0);
 
     /**
-     * 空气湿度
+     * 数值异常 0：正常 1：异常 默认：0
      */
-    private BigDecimal airHumidity;
-
-    /**
-     * 光照强度
-     */
-    private BigDecimal lightIntensity;
-
-    /**
-     * 土壤湿度
-     */
-    private BigDecimal soilHumidity;
-
-    /**
-     * 土壤温度
-     */
-    private BigDecimal soilTemp;
-
-    /**
-     * CO2 浓度
-     */
-    private BigDecimal co2Concentration;
-
-    /**
-     * 数据采集/入库时间
-     */
-    private Date createTime;
+    private Integer ex = 0;
 }

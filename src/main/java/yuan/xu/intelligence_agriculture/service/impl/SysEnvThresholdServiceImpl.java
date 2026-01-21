@@ -1,7 +1,6 @@
 package yuan.xu.intelligence_agriculture.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.extension.conditions.query.LambdaQueryChainWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,7 +21,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import static yuan.xu.intelligence_agriculture.key.RedisKey.ALL_ENV_THRESHOLD_KEY;
+import static yuan.xu.intelligence_agriculture.key.RedisKey.ENV_THRESHOLD_KEY;
 
 @Service
 @Slf4j
@@ -49,9 +48,9 @@ public class SysEnvThresholdServiceImpl extends ServiceImpl<SysEnvThresholdMappe
             EnvThresholdMaps.forEach(
                     (envCode, list) -> {
                         list.forEach(threshold -> {
-                            redisTemplate.opsForHash().put(ALL_ENV_THRESHOLD_KEY + envCode, threshold.getId().toString(), threshold);
+                            redisTemplate.opsForHash().put(ENV_THRESHOLD_KEY + envCode, threshold.getId().toString(), threshold);
                         });
-                        redisTemplate.expire(ALL_ENV_THRESHOLD_KEY + envCode, 24, TimeUnit.HOURS);
+                        redisTemplate.expire(ENV_THRESHOLD_KEY + envCode, 24, TimeUnit.HOURS);
                     }
             );
         }
@@ -98,7 +97,7 @@ public class SysEnvThresholdServiceImpl extends ServiceImpl<SysEnvThresholdMappe
 
     @Override
     public List<EnvThresholdResp> queryEnvThreshold(String envCode) {
-        Map<Object, Object> entries = redisTemplate.opsForHash().entries(ALL_ENV_THRESHOLD_KEY + envCode);
+        Map<Object, Object> entries = redisTemplate.opsForHash().entries(ENV_THRESHOLD_KEY + envCode);
         // 先建立一个null的list,如果entries为空,则返回一个空的list,避免直接返回null
         List<EnvThresholdResp>  envThresholdRespList = new ArrayList<>();
         if (!entries.isEmpty()) {
@@ -118,9 +117,9 @@ public class SysEnvThresholdServiceImpl extends ServiceImpl<SysEnvThresholdMappe
                                         .collect(Collectors.toList()))
         );
         Map<Long, SysEnvThreshold> IdAndEnvThreshold = existingList.stream().collect(Collectors.toMap(SysEnvThreshold::getId, threshold -> threshold));
-        redisTemplate.delete(ALL_ENV_THRESHOLD_KEY + req.getEnvCode());
-        redisTemplate.opsForHash().putAll(ALL_ENV_THRESHOLD_KEY + req.getEnvCode(), IdAndEnvThreshold);
-        redisTemplate.expire(ALL_ENV_THRESHOLD_KEY + req.getEnvCode(), 24, TimeUnit.HOURS);
+        redisTemplate.delete(ENV_THRESHOLD_KEY + req.getEnvCode());
+        redisTemplate.opsForHash().putAll(ENV_THRESHOLD_KEY + req.getEnvCode(), IdAndEnvThreshold);
+        redisTemplate.expire(ENV_THRESHOLD_KEY + req.getEnvCode(), 24, TimeUnit.HOURS);
         log.info("Redis 环境阈值缓存已刷新，当前总数: {}", existingList.size());
     }
 

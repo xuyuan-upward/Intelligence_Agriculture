@@ -49,7 +49,7 @@ public class DeviceStatusTask {
      * 每 2 秒执行一次状态检查
      * 检查采集和控制设备的在线状态，发生变更推送给前端
      */
-    @Scheduled(fixedRate = 2000)
+    @Scheduled(fixedRate = 4000)
     public void checkDeviceStatus() {
         // 推送采集设备在线状态给前端
         /// 1.获取环境实例
@@ -63,14 +63,11 @@ public class DeviceStatusTask {
             Map<String, Integer> sensorStatusMap = sysSensorDeviceService.listAllDevicesStatus(envCode);
             if (sensorStatusMap == null) sensorStatusMap = new HashMap<>();
             
-            Map<String, Integer> lastSensorMap = lastAllSensorStatusMap.get(envCode);
-            if (!sensorStatusMap.equals(lastSensorMap)) {
-                lastAllSensorStatusMap.put(envCode, new HashMap<>(sensorStatusMap));
-                List<DeviceStatusResp> dtoList = sensorStatusMap.entrySet().stream()
-                        .map(e -> new DeviceStatusResp(e.getKey(), e.getValue()))
-                        .collect(Collectors.toList());
-                WebSocketSendInfo("SENSOR_DEVICE_STATUS", envCode, dtoList);
-            }
+            // Convert Map to List<DeviceStatusResp> for WebSocket transmission
+            List<DeviceStatusResp> statusList = new ArrayList<>();
+            sensorStatusMap.forEach((k, v) -> statusList.add(new DeviceStatusResp(k, v)));
+            
+            WebSocketSendInfo("SENSOR_DEVICE_STATUS", envCode, statusList);
         }
     }
 

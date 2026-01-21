@@ -6,7 +6,9 @@ import yuan.xu.intelligence_agriculture.model.IotSensorData;
 import yuan.xu.intelligence_agriculture.model.SysControlDevice;
 import yuan.xu.intelligence_agriculture.req.DeviceModeReq;
 import yuan.xu.intelligence_agriculture.req.DeviceModeReqs;
+import yuan.xu.intelligence_agriculture.resp.IotSensorDataListResp;
 
+import java.util.List;
 import java.util.Map;
 
 public interface SysControlDeviceService extends IService<SysControlDevice> {
@@ -22,21 +24,16 @@ public interface SysControlDeviceService extends IService<SysControlDevice> {
     void updateSingleMode(DeviceModeReq req);
 
     /**
-     * 自动模式下的控制触发
+     * 检查是否触发对应的自动控制，以及对应的控制设备是否需要"开启"
      */
     void checkAndAutoControl(IotSensorData data, Map<Integer, SensorData> integerSensorDataMap);
+
 
 
     /**
      * 更新某个环境"所有"控制设备的控制模式
      */
     void updatesDevicesMode(DeviceModeReqs reqs);
-
-    /**
-     * 判断对应控制设备状态是否离线,并获取判断后的所有设备状态
-     */
-    Map<String, Integer> listAllDevicesStatus(String envCode);
-
 
 
 //    /**
