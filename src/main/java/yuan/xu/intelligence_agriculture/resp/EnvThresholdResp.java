@@ -2,6 +2,8 @@ package yuan.xu.intelligence_agriculture.resp;
 
 import lombok.Data;
 
+import java.math.BigDecimal;
+
 @Data
 public class EnvThresholdResp {
     /**
@@ -15,11 +17,12 @@ public class EnvThresholdResp {
     private Integer envParameterType;
 
     /**
-     * 最大阈值
+     * 阈值下限
      */
-    private Integer max;
+    private BigDecimal minValue;
+
     /**
-     * 最大阈值
+     * 阈值上限
      */
-    private Integer min;
+    private BigDecimal maxValue;
 }

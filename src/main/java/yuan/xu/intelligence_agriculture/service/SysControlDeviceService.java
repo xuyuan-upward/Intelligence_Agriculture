@@ -16,7 +16,7 @@ public interface SysControlDeviceService extends IService<SysControlDevice> {
     /**
      * 手动控制设备开关
      */
-    void controlDevice(String deviceCode, Integer status, String envCode);
+    void controlDevice(String deviceCode, Integer status, String envCode, String deviceName);
 
     /**
      * 更新某个环境的"单个"设备的控制模式
@@ -35,9 +35,8 @@ public interface SysControlDeviceService extends IService<SysControlDevice> {
      */
     void updatesDevicesMode(DeviceModeReqs reqs);
 
-
-//    /**
-//     * 获取所有控制设备（优先从缓存获取）
-//     */
-//    List<SysControlDevice> listAllDevicesFromCache();
+    /**
+     * 获取某个环境下的所有控制设备（带状态）
+     */
+    List<SysControlDevice> listControlDevices(String envCode);
 }

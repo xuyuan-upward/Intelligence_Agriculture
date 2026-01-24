@@ -1,6 +1,7 @@
 package yuan.xu.intelligence_agriculture.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
+import yuan.xu.intelligence_agriculture.dto.CommonResult;
 import yuan.xu.intelligence_agriculture.model.IotSensorData;
 import yuan.xu.intelligence_agriculture.req.AnalysisReq;
 import yuan.xu.intelligence_agriculture.resp.IotSensorHistoryDataResp;
@@ -20,7 +21,7 @@ public interface IotDataService extends IService<IotSensorData> {
      * 获取历史工况分析数据
      * 限制：只能查询 6 小时之前的数据
      */
-    List<IotSensorHistoryDataResp> getAnalysisData(AnalysisReq req);
+    CommonResult<List<IotSensorHistoryDataResp>> getAnalysisData(AnalysisReq req);
 
     /**
      * 获取近一小时的记录，用于趋势图表展示

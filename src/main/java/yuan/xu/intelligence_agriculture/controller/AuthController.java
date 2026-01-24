@@ -5,6 +5,7 @@ import org.springframework.web.bind.annotation.*;
 import yuan.xu.intelligence_agriculture.dto.CommonResult;
 import yuan.xu.intelligence_agriculture.req.LoginReq;
 import yuan.xu.intelligence_agriculture.req.RegisterReq;
+import yuan.xu.intelligence_agriculture.req.ResetPasswordReq;
 import yuan.xu.intelligence_agriculture.req.SendCodeReq;
 import yuan.xu.intelligence_agriculture.resp.AuthResp;
 import yuan.xu.intelligence_agriculture.service.AuthService;
@@ -37,5 +38,10 @@ public class AuthController {
             response.setStatus((int) result.getCode());
         }
         return result;
+    }
+
+    @PostMapping("/reset-password")
+    public CommonResult<String> resetPassword(@RequestBody ResetPasswordReq req) {
+        return authService.resetPassword(req);
     }
 }

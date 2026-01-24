@@ -23,4 +23,9 @@ public class DeviceControlReq {
      * 目标状态(0关/1开)
      */
     private Integer status;
+
+    /**
+     * 设备的名称
+     */
+    private String deviceName;
 }

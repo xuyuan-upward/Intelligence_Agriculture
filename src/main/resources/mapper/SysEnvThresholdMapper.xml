@@ -7,12 +7,12 @@
         SET
         max_value = CASE env_parameter_type
         <foreach collection="list" item="item">
-            WHEN #{item.envParameterType} THEN #{item.max}
+            WHEN #{item.envParameterType} THEN #{item.maxValue}
         </foreach>
         END,
         min_value = CASE env_parameter_type
         <foreach collection="list" item="item">
-            WHEN #{item.envParameterType} THEN #{item.min}
+            WHEN #{item.envParameterType} THEN #{item.minValue}
         </foreach>
         END,
         update_time = NOW()

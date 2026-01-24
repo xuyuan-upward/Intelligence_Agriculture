@@ -8,6 +8,7 @@ import yuan.xu.intelligence_agriculture.req.EnvThresholdReq;
 import yuan.xu.intelligence_agriculture.resp.EnvThresholdResp;
 
 import java.util.List;
+import java.util.Map;
 
 public interface SysEnvThresholdService extends IService<SysEnvThreshold> {
     /**
@@ -28,4 +29,12 @@ public interface SysEnvThresholdService extends IService<SysEnvThreshold> {
      * @param envCode
      */
     List<EnvThresholdResp> queryEnvThreshold(String envCode);
+
+    /**
+     * 从缓存中获取环境阈值
+     *
+     * @param envCode
+     * @return
+     */
+    Map<Long, SysEnvThreshold> FromCacheGetEnvThreshold(String envCode);
 }

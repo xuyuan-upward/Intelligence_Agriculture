@@ -2,10 +2,12 @@ package yuan.xu.intelligence_agriculture.controller;
 
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.*;
 import yuan.xu.intelligence_agriculture.dto.CommonResult;
 import yuan.xu.intelligence_agriculture.model.IotSensorData;
 import yuan.xu.intelligence_agriculture.model.SysControlDevice;
+import yuan.xu.intelligence_agriculture.model.SysEnvThreshold;
 import yuan.xu.intelligence_agriculture.model.SysGreenhouse;
 import yuan.xu.intelligence_agriculture.req.*;
 import yuan.xu.intelligence_agriculture.resp.AiAnalysisResp;
@@ -15,9 +17,9 @@ import yuan.xu.intelligence_agriculture.service.*;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
+import java.util.*;
+
+import static yuan.xu.intelligence_agriculture.key.RedisKey.AUTO_DEVICE_STATUS_KEY;
 
 /**
  * 智能农业对外 API 控制器
@@ -42,6 +44,8 @@ public class AgricultureController {
     private SysGreenhouseService sysGreenhouseService;
     @Autowired
     private SysEnvThresholdService sysEnvThresholdService;
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
 
     /**
      * 获取历史传感器数据列表
@@ -53,38 +57,14 @@ public class AgricultureController {
     }
 
     /**
-     * 获取历史工况分析数据
+     * 获取历史工况 analysis 数据
      * 限制：
      * 1. 只能查询最近 6 小时内的数据
      * 2. 查询时间范围不得超过 6 小时
      */
     @PostMapping("/query/data/analysis")
     public CommonResult<List<IotSensorHistoryDataResp>> getAnalysisData(@RequestBody AnalysisReq req) {
-        if (req.getEnvCode() == null || req.getStartTime() == null || req.getEndTime() == null) {
-            return CommonResult.failed("请求参数不完整");
-        }
-
-        long startTime = req.getStartTime().getTime();
-        long endTime = req.getEndTime().getTime();
-        long now = System.currentTimeMillis();
-        long sixHoursMs = 6 * 60 * 60 * 1000;
-
-        // 1. 校验查询范围是否超过 6 小时
-        if (endTime - startTime > sixHoursMs) {
-            return CommonResult.failed("查询时间范围不能超过 6 小时");
-        }
-
-        // 2. 校验结束时间是否在未来 (允许查询最近的数据)
-        if (endTime > now + 60 * 1000) { // 稍微给点容错
-            return CommonResult.failed("不能查询未来的数据");
-        }
-
-        // 3. 校验开始时间是否早于结束时间
-        if (startTime >= endTime) {
-            return CommonResult.failed("开始时间必须早于结束时间");
-        }
-
-        return CommonResult.success(iotDataService.getAnalysisData(req));
+        return iotDataService.getAnalysisData(req);
     }
 
     /**
@@ -93,7 +73,7 @@ public class AgricultureController {
      */
     @PostMapping("/update/device/control")
     public CommonResult<String> controlDevice(@RequestBody DeviceControlReq req) {
-        sysControlDeviceService.controlDevice(req.getDeviceCode(), req.getStatus(),req.getEnvCode());
+        sysControlDeviceService.controlDevice(req.getDeviceCode(), req.getStatus(),req.getEnvCode(),req.getDeviceName());
         return CommonResult.success("操作成功");
     }
 
@@ -104,10 +84,7 @@ public class AgricultureController {
      */
     @GetMapping("/query/device/list")
     public CommonResult<List<SysControlDevice>> listControlDevices(@RequestParam String envCode) {
-        List<SysControlDevice> list = sysControlDeviceService.lambdaQuery()
-                .eq(SysControlDevice::getGreenhouseEnvCode, envCode)
-                .list();
-        return CommonResult.success(list);
+        return CommonResult.success(sysControlDeviceService.listControlDevices(envCode));
     }
 
     /**

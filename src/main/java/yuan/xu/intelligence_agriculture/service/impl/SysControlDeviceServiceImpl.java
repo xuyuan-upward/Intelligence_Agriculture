@@ -56,6 +56,8 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
 
     @Value("${mqtt.control-topic}")
     private String controlTopic;
+    @Autowired
+    private SysEnvThresholdService sysEnvThresholdService;
 
 
     @PostConstruct
@@ -116,21 +118,17 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
      * @param deviceCode 对应的设备唯一编码
      * @param status
      * @param envCode
+     * @param deviceName
      */
     @Override
-    public void controlDevice(String deviceCode, Integer status, String envCode) {
+    public void controlDevice(String deviceCode, Integer status, String envCode, String deviceName) {
         // 手动模式下，控制设备只需要更新一个状态并更新缓存
         if (!envIsAuto(envCode)) {
             redisTemplate.opsForHash().put(AUTO_DEVICE_STATUS_KEY + envCode, deviceCode, status);
             log.warn("环境: {} 【手动模式】控制设备: {}，设备状态：【{}】", envCode, deviceCode, status == 1 ? "开启" : "关闭");
         }
-        LambdaQueryWrapper<SysControlDevice> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(SysControlDevice::getDeviceCode, deviceCode);
-        SysControlDevice device = this.getOne(queryWrapper);
-        if (device == null) {
-            log.warn("未找到设备: {}", deviceCode);
-            return;
-        }
+        log.warn("环境: {} 【自动模式】控制设备: {}，设备状态：【{}】", envCode, deviceCode, status == 1 ? "开启" : "关闭");
+        
         if (deviceCode == null || envCode == null || status == null) return;
         Map<String, Object> command = new HashMap<>();
         command.put("envCode", envCode);
@@ -145,24 +143,16 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
         log.info("MQTT 控制下发: topic={}, payload={}", publishTopic, JSONUtil.toJsonStr(command));
         mqttGateway.sendToMqtt(JSONUtil.toJsonStr(command), publishTopic);
 
-        SysControlLog logEntry = new SysControlLog();
-        logEntry.setDeviceCode(deviceCode);
-        logEntry.setOperationType(device.getControlMode());
-        logEntry.setCreateTime(new Date());
-        // todo 控制日志看是否要添加
-//        sysControlLogMapper.insert(logEntry);
-
-        // todo 更新数据库中设备的运行状态,不用数据库的状态了，直接用Redis作为主存储
-//        device.setStatus(status);
-//        device.setUpdateTime(new Date());
-//        this.updateById(device);
-
-
         // todo 控制日志看后续完善
         SystemLogResp logDTO = new SystemLogResp();
-        logDTO.setType(device.getControlMode() == 1 ? "success" : "primary");
-        logDTO.setSource(device.getControlMode() == 1 ? "自动控制" : "手动控制");
-        logDTO.setMessage(device.getDeviceName() + (status == 1 ? " 已开启" : " 已关闭"));
+        // 如果是手动模式，deviceName 优先使用传入的参数
+        String finalDeviceName = deviceName != null ? deviceName : deviceCode;
+        
+        // 判断当前模式用于日志显示
+        boolean isAuto = envIsAuto(envCode);
+        logDTO.setType(isAuto ? "success" : "primary");
+        logDTO.setSource(isAuto ? "自动控制" : "手动控制");
+        logDTO.setMessage(finalDeviceName + (status == 1 ? " 已开启" : " 已关闭"));
         WebSocketSendInfo("SYSTEM_LOG", envCode, logDTO);
     }
 
@@ -233,6 +223,12 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
 
         redisTemplate.opsForValue().set(key, list);
         redisTemplate.expire(key, 24, TimeUnit.HOURS);
+
+        // 获取控制状态
+        Map<String, Integer> autoControlStatusMap = fromCacheGetControlDeviceStatus(envCode, list);
+        list.forEach(sysControlDevice -> {
+            sysControlDevice.setStatus(autoControlStatusMap.get(sysControlDevice.getDeviceCode()));
+        });
         return list;
     }
 
@@ -257,9 +253,8 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
          * 用map来存储对应不同环境下的环境阈值,key根据不同环境来区分,filed:根据环境ID来区分,value:对应的整个环境阈值对象
          * 为什么filed:根据环境ID来区分?因为对应的控制器只和对应的环境阈值挂钩,其中挂钩是靠:环境阈值ID
          */
-        Map<Object, Object> map = redisTemplate.opsForHash().entries(ENV_THRESHOLD_KEY + data.getGreenhouseEnvCode());
-        HashMap<Long, SysEnvThreshold> sysEnvThresholdHashMap = new HashMap<>();
-        map.forEach((k, v) -> sysEnvThresholdHashMap.put(Long.valueOf((String) k), (SysEnvThreshold) v));
+         Map<Long, SysEnvThreshold> sysEnvThresholdHashMap = sysEnvThresholdService.FromCacheGetEnvThreshold(greenhouseEnvCode);
+        // 进入自动判断的逻辑入口
         if (autoDeviceCache == null || autoDeviceCache.isEmpty() || sysEnvThresholdHashMap == null) {
             return;
         }
@@ -275,8 +270,10 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
 
         // 统一推送设备状态变更
         if (!AfterUpdateControlStatusMap.isEmpty() && !BeforeUpdateControlStatusMap.equals(AfterUpdateControlStatusMap)) {
-            // 刷新缓存
+            // 删除旧的缓存
             redisTemplate.delete(AUTO_DEVICE_STATUS_KEY + greenhouseEnvCode);
+            // 重构设备状态缓存
+            redisTemplate.opsForHash().putAll(AUTO_DEVICE_STATUS_KEY + greenhouseEnvCode, AfterUpdateControlStatusMap);
             // Convert Map to List of Objects for frontend
             List<DeviceStatusResp> statusList = new ArrayList<>();
             AfterUpdateControlStatusMap.forEach((k, v) -> {
@@ -303,6 +300,21 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
             redisTemplate.opsForHash().putAll(key, hashMap);
             return hashMap;
         }
+    }
+
+    @Override
+    public List<SysControlDevice> listControlDevices(String envCode) {
+        List<SysControlDevice> list = this.lambdaQuery()
+                .eq(SysControlDevice::getGreenhouseEnvCode, envCode)
+                .list();
+
+        Map<String, Integer> autoControlStatusMap = fromCacheGetControlDeviceStatus(envCode, list);
+
+        // 获取控制状态
+        list.forEach(sysControlDevice -> {
+            sysControlDevice.setStatus(autoControlStatusMap.get(sysControlDevice.getDeviceCode()));
+        });
+        return list;
     }
 
     /**
@@ -354,8 +366,6 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
                                       Map<String, Integer> updatedDevices) {
         // 设备不是自动模式，直接跳过
         boolean deviceIsAuto = deviceIsAuto(device);
-        log.info("设备控制模式:{},设备控制名称:{}", deviceIsAuto == true ? "自动" : "手动",device.getDeviceName());
-        log.info("");
         if (!deviceIsAuto) {
             return;
         }
@@ -380,13 +390,13 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
         // todo 去掉控制设备逻辑运行状态，改成直接根据当前阈值来直接控制设备，
         //  不需要拿之前逻辑状态来作为判断依据，解决了设备状态漂移（物理状态和缓存状态不一致问题）
         if (action == 1) {
-            controlDevice(device.getDeviceCode(), ON.getCode(), device.getGreenhouseEnvCode());
+             controlDevice(device.getDeviceCode(), ON.getCode(), device.getGreenhouseEnvCode(), device.getDeviceName());
             // 更新当前对象状态并加入列表
             updatedDevices.put(device.getDeviceCode(), ON.getCode());
             log.info("自动控制模式开启下:开启-设备{}, 当前值: {}",
                     device.getDeviceName(),   currentVal);
         } else if (action == -1) {
-            controlDevice(device.getDeviceCode(), OFF.getCode(), device.getGreenhouseEnvCode());
+             controlDevice(device.getDeviceCode(), OFF.getCode(), device.getGreenhouseEnvCode(), device.getDeviceName());
             // 把当前发生变更的状态放进去
             updatedDevices.put(device.getDeviceCode(), OFF.getCode());
             log.info("自动控制模式开启下:关闭-设备{}, 当前值: {}",

@@ -9,6 +9,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import yuan.xu.intelligence_agriculture.dto.CommonResult;
 import yuan.xu.intelligence_agriculture.dto.SensorData;
 import yuan.xu.intelligence_agriculture.dto.SensorDataBO;
 import yuan.xu.intelligence_agriculture.mapper.IotSensorDataMapper;
@@ -117,9 +118,35 @@ public class IotDataServiceImpl extends ServiceImpl<IotSensorDataMapper, IotSens
     }
 
     @Override
-    public List<IotSensorHistoryDataResp> getAnalysisData(AnalysisReq req) {
-        // 注：由于 Controller 层已进行严格的时间范围（6小时内）和时间点（6小时前）校验，
-        // 此处直接执行查询逻辑。
+    public CommonResult<List<IotSensorHistoryDataResp>> getAnalysisData(AnalysisReq req) {
+        if (req.getEnvCode() == null || req.getStartTime() == null || req.getEndTime() == null) {
+            return CommonResult.failed("请求参数不完整");
+        }
+
+        long startTime = req.getStartTime().getTime();
+        long endTime = req.getEndTime().getTime();
+        long now = System.currentTimeMillis();
+        long sixHoursMs = 6 * 60 * 60 * 1000;
+
+        // 1. 校验查询范围是否超过 6 小时
+        if (endTime - startTime > sixHoursMs) {
+            return CommonResult.failed("查询时间范围不能超过 6 小时");
+        }
+
+        // 2. 校验结束时间是否在未来 (允许查询最近的数据)
+        if (endTime > now + 60 * 1000) { // 稍微给点容错
+            return CommonResult.failed("不能查询未来的数据");
+        }
+
+        // 3. 校验开始时间是否早于允许的最早时间 (最近 6 小时)
+        if (startTime < now - sixHoursMs - 60 * 1000) { // 稍微给点容错
+            return CommonResult.failed("只能查询最近 6 小时内的数据");
+        }
+
+        // 4. 校验开始时间是否早于结束时间
+        if (startTime >= endTime) {
+            return CommonResult.failed("开始时间必须早于结束时间");
+        }
 
         List<IotSensorData> list = this.lambdaQuery()
                 .eq(IotSensorData::getGreenhouseEnvCode, req.getEnvCode())
@@ -134,7 +161,7 @@ public class IotDataServiceImpl extends ServiceImpl<IotSensorDataMapper, IotSens
             BeanUtils.copyProperties(data, item);
             respList.add(item);
         }
-        return respList;
+        return CommonResult.success(respList);
     }
 
     @Override

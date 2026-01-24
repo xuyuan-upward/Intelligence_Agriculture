@@ -3,10 +3,12 @@ package yuan.xu.intelligence_agriculture.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import yuan.xu.intelligence_agriculture.enums.EnvParameterType;
 import yuan.xu.intelligence_agriculture.mapper.SysEnvThresholdMapper;
 import yuan.xu.intelligence_agriculture.model.SysEnvThreshold;
 import yuan.xu.intelligence_agriculture.req.EnvThresholdListReq;
@@ -15,7 +17,9 @@ import yuan.xu.intelligence_agriculture.resp.EnvThresholdResp;
 import yuan.xu.intelligence_agriculture.service.SysEnvThresholdService;
 
 import javax.annotation.PostConstruct;
+import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -31,14 +35,8 @@ public class SysEnvThresholdServiceImpl extends ServiceImpl<SysEnvThresholdMappe
     @Autowired
     private SysEnvThresholdMapper sysEnvThresholdMapper;
 
-
-    @PostConstruct
-    public void init() {
-
-        refreshEnvThresholdCache();
-    }
-
-    // 环境阈值预缓存
+    // todo 环境阈值预缓存不需要了，没有再去数据查询
+    @Deprecated
     private void refreshEnvThresholdCache() {
         List<SysEnvThreshold> sysEnvThresholdList = list();
         ///  根据对应环境实例区分不同的环境阈值,方便后续的存放 key:环境实例编码 value:对应实例编码下的环境阈值
@@ -57,6 +55,7 @@ public class SysEnvThresholdServiceImpl extends ServiceImpl<SysEnvThresholdMappe
         }
         log.info("Redis 环境阈值预缓存，当前环境阈值数量: {}", sysEnvThresholdList.size());
     }
+
     /// 单个环境阈值修改
     @Override
     public void updateSingleEnvThreshold(EnvThresholdReq req) {
@@ -69,6 +68,39 @@ public class SysEnvThresholdServiceImpl extends ServiceImpl<SysEnvThresholdMappe
         if (req == null || req.getEnvCode() == null || req.getEnvThresholdList() == null || req.getEnvThresholdList().isEmpty()) {
             return;
         }
+
+        // 参数校验
+        for (EnvThresholdReq threshold : req.getEnvThresholdList()) {
+            BigDecimal min = threshold.getMinValue();
+            BigDecimal max = threshold.getMaxValue();
+            Integer type = threshold.getEnvParameterType();
+
+            if (min != null && max != null && min.compareTo(max) > 0) {
+                throw new IllegalArgumentException("环境参数类型 " + type + ": 最小值不能大于最大值");
+            }
+
+            if (min != null) {
+                if ((type.equals(EnvParameterType.AIR_HUMIDITY.getEnvParameterType()) || type.equals(EnvParameterType.SOIL_HUMIDITY.getEnvParameterType()))
+                        && (min.compareTo(BigDecimal.ZERO) < 0 || min.compareTo(new BigDecimal("100")) > 0)) {
+                    throw new IllegalArgumentException("环境参数类型 " + type + ": 湿度必须在 0 到 100 之间");
+                }
+                if ((type.equals(EnvParameterType.CO2_CONCENTRATION.getEnvParameterType()) || type.equals(EnvParameterType.LIGHT_INTENSITY.getEnvParameterType()))
+                        && min.compareTo(BigDecimal.ZERO) < 0) {
+                    throw new IllegalArgumentException("环境参数类型 " + type + ": 值不能为负数");
+                }
+            }
+            if (max != null) {
+                if ((type.equals(EnvParameterType.AIR_HUMIDITY.getEnvParameterType()) || type.equals(EnvParameterType.SOIL_HUMIDITY.getEnvParameterType()))
+                        && (max.compareTo(BigDecimal.ZERO) < 0 || max.compareTo(new BigDecimal("100")) > 0)) {
+                    throw new IllegalArgumentException("环境参数类型 " + type + ": 湿度必须在 0 到 100 之间");
+                }
+                if ((type.equals(EnvParameterType.CO2_CONCENTRATION.getEnvParameterType()) || type.equals(EnvParameterType.LIGHT_INTENSITY.getEnvParameterType()))
+                        && max.compareTo(BigDecimal.ZERO) < 0) {
+                    throw new IllegalArgumentException("环境参数类型 " + type + ": 值不能为负数");
+                }
+            }
+        }
+
         // todo: 批量更新(普通数量不大情况) =>  使用 MyBatis-Plus 的 updateBatchById（推荐）
         // 步骤1：先从数据库查询出现有的记录（获取ID）
 //        List<SysEnvThreshold> existingList = sysEnvThresholdMapper.selectList(
@@ -92,38 +124,45 @@ public class SysEnvThresholdServiceImpl extends ServiceImpl<SysEnvThresholdMappe
 //        List<SysEnvThreshold> list = list(lambdaQuery().eq(SysEnvThreshold::getGreenhouseEnvCode, req.getEnvCode()));
         // todo 进阶版本:直接调用，只执行一次SQL
         sysEnvThresholdMapper.batchUpdateEnvThreshold(req.getEnvCode(), req.getEnvThresholdList());
-        // 5. 刷新某个环境下的全部环境阈值 Redis 缓存
-        refreshThresholdCache(req);
+        // 删除旧缓存
+        redisTemplate.delete(ENV_THRESHOLD_KEY + req.getEnvCode());
     }
 
     @Override
     public List<EnvThresholdResp> queryEnvThreshold(String envCode) {
-        Map<Object, Object> entries = redisTemplate.opsForHash().entries(ENV_THRESHOLD_KEY + envCode);
         // 先建立一个null的list,如果entries为空,则返回一个空的list,避免直接返回null
-        List<EnvThresholdResp>  envThresholdRespList = new ArrayList<>();
-        if (!entries.isEmpty()) {
-            envThresholdRespList = entries.values().stream().map(item -> (EnvThresholdResp) item).collect(Collectors.toList());
-        }
+        Map<Long, SysEnvThreshold> longSysEnvThresholdMap = FromCacheGetEnvThreshold(envCode);
+        List<EnvThresholdResp> envThresholdRespList = new ArrayList<>();
+        longSysEnvThresholdMap.forEach(
+                (sysId, sysEnvThreshold) -> {
+                    EnvThresholdResp envThresholdResp = new EnvThresholdResp();
+                    envThresholdResp.setEnvParameterType(sysEnvThreshold.getEnvParameterType());
+                    envThresholdResp.setMaxValue(sysEnvThreshold.getMaxValue());
+                    envThresholdResp.setMinValue(sysEnvThreshold.getMinValue());
+                    envThresholdResp.setEnvCode(sysEnvThreshold.getGreenhouseEnvCode());
+                    envThresholdRespList.add(envThresholdResp);
+                }
+        );
         return envThresholdRespList;
     }
 
-    private void refreshThresholdCache(EnvThresholdListReq req) {
-        // 步骤1：先从数据库查询出现有的记录（获取ID）
-        List<SysEnvThreshold> existingList = sysEnvThresholdMapper.selectList(
-                new LambdaQueryWrapper<SysEnvThreshold>()
-                        .eq(SysEnvThreshold::getGreenhouseEnvCode, req.getEnvCode())
-                        .in(SysEnvThreshold::getEnvParameterType,
-                                req.getEnvThresholdList().stream()
-                                        .map(EnvThresholdReq::getEnvParameterType)
-                                        .collect(Collectors.toList()))
-        );
-        Map<String, SysEnvThreshold> IdAndEnvThreshold = existingList.stream().collect(Collectors.toMap( (val)-> val.getId().toString(), threshold -> threshold));
-        redisTemplate.delete(ENV_THRESHOLD_KEY + req.getEnvCode());
-        redisTemplate.opsForHash().putAll(ENV_THRESHOLD_KEY + req.getEnvCode(), IdAndEnvThreshold);
-        redisTemplate.expire(ENV_THRESHOLD_KEY + req.getEnvCode(), 24, TimeUnit.HOURS);
-        log.info("Redis 环境阈值缓存已刷新，当前总数: {}", existingList.size());
-    }
+    public Map<Long, SysEnvThreshold> FromCacheGetEnvThreshold(String envCode) {
+        Map<Object, Object> entries = redisTemplate.opsForHash().entries(ENV_THRESHOLD_KEY + envCode);
+        if (!entries.isEmpty()) {
+            HashMap<Long, SysEnvThreshold> sysEnvThresholdHashMap = new HashMap<>();
+            entries.forEach((k, v) -> sysEnvThresholdHashMap.put(Long.valueOf((String) k), (SysEnvThreshold) v));
+            return sysEnvThresholdHashMap;
+        }
+        // 缓存为null直接从数据库中查
+        // 查询数据库
+        List<SysEnvThreshold> list = lambdaQuery().eq(SysEnvThreshold::getGreenhouseEnvCode, envCode).list();
+        if (!list.isEmpty()) {
+            // 构建缓存
+            redisTemplate.opsForHash().putAll(ENV_THRESHOLD_KEY + envCode, list.stream().collect(Collectors.toMap(item -> item.getId().toString(), item -> item)));
+        }
+        return list.stream().collect(Collectors.toMap(SysEnvThreshold::getId, item -> item));
 
+    }
 
     /*// 环境阈值缓存修改
     public void updateSingleEnvThresholdCache(EnvThresholdDTO envThresholdDTO) {

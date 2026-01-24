@@ -10,6 +10,7 @@ import yuan.xu.intelligence_agriculture.dto.CommonResult;
 import yuan.xu.intelligence_agriculture.model.SysUser;
 import yuan.xu.intelligence_agriculture.req.LoginReq;
 import yuan.xu.intelligence_agriculture.req.RegisterReq;
+import yuan.xu.intelligence_agriculture.req.ResetPasswordReq;
 import yuan.xu.intelligence_agriculture.req.SendCodeReq;
 import yuan.xu.intelligence_agriculture.resp.AuthResp;
 import yuan.xu.intelligence_agriculture.service.AuthService;
@@ -130,6 +131,40 @@ public class AuthServiceImpl implements AuthService {
         redisTemplate.opsForValue().set(cooldownKey, 1, 60, TimeUnit.SECONDS);
         log.info("验证码发送: phone:{} code:{}", phone, code);
         return CommonResult.success("OK");
+    }
+
+    @Override
+    public CommonResult<String> resetPassword(ResetPasswordReq req) {
+        String phone = StringUtils.trimToEmpty(req.getPhone());
+        if (!isValidPhone(phone)) {
+            return CommonResult.failed("手机号格式不正确");
+        }
+        if (StringUtils.isBlank(req.getNewPassword()) || req.getNewPassword().length() < 6) {
+            return CommonResult.failed("新密码至少6位");
+        }
+        
+        SysUser user = sysUserService.lambdaQuery().eq(SysUser::getPhone, phone).one();
+        if (user == null) {
+            return CommonResult.failed("该手机号未注册");
+        }
+        
+        if (!validateCode(phone, req.getCode())) {
+            return CommonResult.failed("验证码无效或已过期");
+        }
+        
+        boolean updated = sysUserService.lambdaUpdate()
+                .eq(SysUser::getPhone, phone)
+                .set(SysUser::getPassword, BCrypt.hashpw(req.getNewPassword()))
+                .update();
+                
+        if (!updated) {
+            return CommonResult.failed("修改失败");
+        }
+        
+        // 修改成功后清除验证码，防止重复使用
+        redisTemplate.delete(AUTH_SMS_CODE_KEY + phone);
+        
+        return CommonResult.success("密码修改成功");
     }
 
     private boolean isValidPhone(String phone) {

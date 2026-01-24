@@ -7,9 +7,10 @@ import joblib
 import os
 from datetime import datetime, timedelta
 
-# 初始化 Flask 应用
-app = Flask(__name__)
-
+# 创建 Flask 应用
+def create_app():
+    app = Flask(__name__)
+    return app
 # 模型保存路径
 MODEL_PATH = 'agriculture_model.pkl'
 
@@ -75,8 +76,7 @@ def load_model():
         model = train_dummy_model()
         model_data = {'model': model, 'feature_cols': PARAMS}
 
-# 初始化加载
-load_model()
+
 
 @app.route('/predict', methods=['POST', 'GET'])
 def predict():
@@ -91,6 +91,7 @@ def predict():
         if data:
             df = pd.DataFrame(data)
             # 应用特征工程
+        
             df_featured = create_features(df)
             # 获取最新的一行特征用于预测
             latest_features_df = df_featured.tail(1)
@@ -122,9 +123,6 @@ def predict():
             }
             
             for j, param in enumerate(PARAMS):
-                # 获取当前最新值作为基准
-                current_val = float(df[param].iloc[-1]) if param in df.columns else 0
-                
                 # 预测值 (这里我们直接使用模型预测的绝对值，
                 # 但为了演示平滑，如果模型是 Dummy 的，可以做些处理)
                 val = prediction_reshaped[i][j]
@@ -147,4 +145,6 @@ def predict():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
+    load_model()
+    app = create_app(__name__)
     app.run(host='0.0.0.0', port=5000)
