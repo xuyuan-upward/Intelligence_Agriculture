@@ -386,7 +386,6 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
         // 判断当前控制设备是否需要启动或关闭
         int action = computeAction(typeCode, currentVal, min, max, device);
 
-
         // todo 去掉控制设备逻辑运行状态，改成直接根据当前阈值来直接控制设备，
         //  不需要拿之前逻辑状态来作为判断依据，解决了设备状态漂移（物理状态和缓存状态不一致问题）
         if (action == 1) {
@@ -456,12 +455,12 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
         /// 处理CO2浓度特殊逻辑
         if (CO2_CONCENTRATION.getEnvParameterType().equals(typeCode)) {
             if (currentVal.compareTo(max) > 0) return 1;
-            else if (currentVal.compareTo(min) < 0) return -1;
+            else if (currentVal.compareTo(max) < 0) return -1;
             else return 0;
         }
         /// 处理其他环境参数类型的逻辑
         if (currentVal.compareTo(min) < 0) return 1;
-        else if (currentVal.compareTo(max) > 0) return -1;
+        else if (currentVal.compareTo(min) > 0) return -1;
         else return 0;
     }
 

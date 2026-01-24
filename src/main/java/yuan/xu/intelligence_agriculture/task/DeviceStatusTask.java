@@ -49,7 +49,7 @@ public class DeviceStatusTask {
      * 每 2 秒执行一次状态检查
      * 检查采集和控制设备的在线状态，发生变更推送给前端
      */
-    @Scheduled(fixedRate = 4000)
+    @Scheduled(fixedDelay = 4000)
     public void checkDeviceStatus() {
         // 推送采集设备在线状态给前端
         /// 1.获取环境实例

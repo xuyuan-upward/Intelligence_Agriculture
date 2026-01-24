@@ -63,7 +63,7 @@ public class SysSensorDeviceServiceImpl extends ServiceImpl<SysSensorDeviceMappe
                     lastActiveMs = 0L;
                 }
             }
-            statusMap.put(deviceCode, (lastActiveMs > 0 && now - lastActiveMs < 6000) ? 1 : 0);
+            statusMap.put(deviceCode, (lastActiveMs > 0 && now - lastActiveMs < 12000) ? 1 : 0);
         }
         return statusMap;
     }

@@ -1,5 +1,6 @@
 package yuan.xu.intelligence_agriculture.service.impl;
 
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.extern.slf4j.Slf4j;
@@ -7,6 +8,7 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Async;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import yuan.xu.intelligence_agriculture.dto.CommonResult;
@@ -21,11 +23,14 @@ import yuan.xu.intelligence_agriculture.resp.IotSensorDataResp;
 import yuan.xu.intelligence_agriculture.resp.IotSensorHistoryDataResp;
 import yuan.xu.intelligence_agriculture.service.IotDataService;
 import yuan.xu.intelligence_agriculture.service.SysControlDeviceService;
+import yuan.xu.intelligence_agriculture.service.SysEnvThresholdService;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.*;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.stream.Collectors;
 
 import static yuan.xu.intelligence_agriculture.enums.EnvParameterType.*;
@@ -43,12 +48,22 @@ public class IotDataServiceImpl extends ServiceImpl<IotSensorDataMapper, IotSens
 
     @Autowired
     private SysControlDeviceService sysControlDeviceService;
+    @Autowired
+    private SysEnvThresholdService sysEnvThresholdService;
 
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
     // 用来展示存放对应的2s上传的数据,{1}分钟后存储到对应的数据库
     private final List<IotSensorData> iotSensorDataList = new ArrayList<>();
+    List<IotSensorData> toSave = null;
+
+    /**
+     * 传感器数据缓冲队列
+     * 线程安全，用于削峰填谷
+     */
+    private final BlockingQueue<IotSensorData> sensorDataQueue =
+            new LinkedBlockingQueue<>(10_000); // 最大容量，防止 OOM
 
 
     /**
@@ -73,30 +88,18 @@ public class IotDataServiceImpl extends ServiceImpl<IotSensorDataMapper, IotSens
             List<SensorData> sensorDataList = sensorDataBO.getSensorDataList();
 
             if (greenhouseEnvCode != null) {
-                /// 2.保存采集的数据存储到数据库,并获取转型后的IotSensorData数据
+                /// 2. 更新采集设备最新上报时间戳到 Redis
+                updateSensorLatestReportTime(greenhouseEnvCode, sensorDataList);
+                /// 3.保存采集的数据存储到数据库,并获取转型后的IotSensorData数据
                 IotSensorData data = buildIotSensorData(greenhouseEnvCode, sensorDataList);
 
-                /// 3. 批量持久化到数据库 (满30条保存一次)
-                List<IotSensorData> toSave = null;
-                synchronized (iotSensorDataList) {
-                    iotSensorDataList.add(data);
-                    if (iotSensorDataList.size() == 1) {
-                        toSave = new ArrayList<>(iotSensorDataList);
-                        iotSensorDataList.clear();
-                    }
+                /// 4. 批量持久化到数据库 (每隔30s保存)
+                // 4. 放入队列（不阻塞）
+                boolean success = sensorDataQueue.offer(data);
+                if (!success) {
+                    log.error("传感器数据队列已满，丢弃数据: {}", data);
                 }
 
-                if (toSave != null && !toSave.isEmpty()) {
-                    boolean saved = this.saveBatch(toSave);
-                    if (!saved) {
-                        log.error("批量保存传感器数据到数据库失败!");
-                    } else {
-                        log.info("批量保存传感器数据成功，条数: {}", toSave.size());
-                    }
-                }
-
-                /// 4. 更新采集设备最新上报时间戳到 Redis
-                updateSensorLatestReportTime(greenhouseEnvCode, sensorDataList);
 
                 /// 5. 触发自动"控制"设备逻辑 key:环境参数类型,value:传感器数据
                 Map<Integer, SensorData> integerSensorDataMap = sensorDataList.stream()
@@ -116,6 +119,33 @@ public class IotDataServiceImpl extends ServiceImpl<IotSensorDataMapper, IotSens
             log.error("处理传感器数据时发生异常", e);
         }
     }
+
+    /**
+     * 定时批量入库
+     * 每 30 秒执行一次，最多保存 30 条
+     */
+    @Scheduled(fixedDelay = 30000)
+    @Transactional(rollbackFor = Exception.class)
+    public void batchSaveSensorData() {
+
+        List<IotSensorData> batchList = new ArrayList<>(30);
+
+        // 一次最多取 30 条
+        sensorDataQueue.drainTo(batchList, 30);
+
+        if (CollUtil.isEmpty(batchList)) {
+            return;
+        }
+
+        boolean saved = this.saveBatch(batchList);
+        if (!saved) {
+            log.error("批量保存传感器数据失败，条数: {}", batchList.size());
+            throw new RuntimeException("批量入库失败");
+        }
+
+        log.info("批量保存传感器数据成功，条数: {}", batchList.size());
+    }
+
 
     @Override
     public CommonResult<List<IotSensorHistoryDataResp>> getAnalysisData(AnalysisReq req) {
@@ -185,17 +215,11 @@ public class IotDataServiceImpl extends ServiceImpl<IotSensorDataMapper, IotSens
     private IotSensorDataListResp buildIotSensorDataListResp(IotSensorData data, List<SensorData> sensorDataList, SensorDataBO sensorDataBO) {
         IotSensorDataListResp iotSensorDataListResp = new IotSensorDataListResp();
         List<IotSensorDataResp> iotSensorDataRespList = new ArrayList<>();
-        Map<Object, Object> map = redisTemplate.opsForHash().entries(ENV_THRESHOLD_KEY + data.getGreenhouseEnvCode());
         // 转换对应的key，value结构
-        Map<Long, SysEnvThreshold> resultMap = new HashMap<>();
-        map.forEach((k, v) -> resultMap.put(Long.valueOf((String) k), (SysEnvThreshold) v));
-        Map<Integer, SysEnvThreshold> sysEnvThresholdHashMap =
-                resultMap.values()
-                        .stream()
-                        .collect(Collectors.toMap(
-                                SysEnvThreshold::getEnvParameterType,
-                                v -> v
-                        ));
+        Map<Integer, SysEnvThreshold> sysEnvThresholdHashMap = new HashMap<>();
+        sysEnvThresholdService.FromCacheGetEnvThreshold(data.getGreenhouseEnvCode()).forEach((id, threshold) -> {
+            sysEnvThresholdHashMap.put(threshold.getEnvParameterType(), threshold);
+        });
         sensorDataList.forEach(
                 sensorData -> {
                     IotSensorDataResp iotSensorDataResp = new IotSensorDataResp();

@@ -112,12 +112,12 @@ public class AiPredictionServiceImpl implements AiPredictionService {
         // 定义参数映射
         // Type: 1:空气温度, 2:空气湿度, 3:土壤温度, 4:土壤湿度, 5:CO2浓度, 6:光照强度
         Map<Integer, ParamConfig> paramConfigs = new HashMap<>();
-        paramConfigs.put(1, new ParamConfig("空气温度", "°C", PredictionPoint::getAirTemp, IotSensorData::getAirTemp, "C_HEATER_001", "加热片", false));
-        paramConfigs.put(2, new ParamConfig("空气湿度", "%", PredictionPoint::getAirHumidity, IotSensorData::getAirHumidity, "C_HUMIDIFIER_001", "加湿器", false));
-        paramConfigs.put(3, new ParamConfig("土壤温度", "°C", PredictionPoint::getSoilTemp, IotSensorData::getSoilTemp, "C_HEATER_002", "土壤加热片", false));
-        paramConfigs.put(4, new ParamConfig("土壤湿度", "%", PredictionPoint::getSoilHumidity, IotSensorData::getSoilHumidity, "C_WATER_001", "水泵", false));
-        paramConfigs.put(5, new ParamConfig("CO2浓度", "ppm", PredictionPoint::getCo2Concentration, IotSensorData::getCo2Concentration, "C_FAN_001", "风机", true));
-        paramConfigs.put(6, new ParamConfig("光照强度", "Lux", PredictionPoint::getLightIntensity, IotSensorData::getLightIntensity, "C_LIGHT_001", "补光灯", false));
+        paramConfigs.put(1, new ParamConfig("空气温度", "°C", PredictionPoint::getAirTemp, IotSensorData::getAirTemp, "C_HEATER_001", "加热片", false, "空气温度调节", "开启升温"));
+        paramConfigs.put(2, new ParamConfig("空气湿度", "%", PredictionPoint::getAirHumidity, IotSensorData::getAirHumidity, "C_HUMIDIFIER_001", "加湿器", false, "加湿条件", "开启加湿"));
+        paramConfigs.put(3, new ParamConfig("土壤温度", "°C", PredictionPoint::getSoilTemp, IotSensorData::getSoilTemp, "C_HEATER_002", "土壤加热片", false, "土壤温度调节", "开启土壤加热"));
+        paramConfigs.put(4, new ParamConfig("土壤湿度", "%", PredictionPoint::getSoilHumidity, IotSensorData::getSoilHumidity, "C_WATER_001", "水泵", false, "灌溉条件", "开始灌溉"));
+        paramConfigs.put(5, new ParamConfig("CO2浓度", "ppm", PredictionPoint::getCo2Concentration, IotSensorData::getCo2Concentration, "C_FAN_001", "风机", true, "通风条件", "开启排风"));
+        paramConfigs.put(6, new ParamConfig("光照强度", "Lux", PredictionPoint::getLightIntensity, IotSensorData::getLightIntensity, "C_LIGHT_001", "补光灯", false, "补光条件", "开始补光"));
 
         for (Map.Entry<Integer, ParamConfig> entry : paramConfigs.entrySet()) {
             Integer type = entry.getKey();
@@ -182,7 +182,7 @@ public class AiPredictionServiceImpl implements AiPredictionService {
                     BigDecimal margin = maxThreshold.multiply(new BigDecimal("0.05"));
                     deltaVal = predExtreme.subtract(latestVal).add(margin);
                     
-                    actionPrefix = "开启排风";
+                    actionPrefix = config.actionName;
                     targetVal = latestVal.subtract(deltaVal); // 降低至...
                 } else {
                     // 低于阈值 (minThreshold)
@@ -195,7 +195,7 @@ public class AiPredictionServiceImpl implements AiPredictionService {
                     
                     // Display Target (提升至) = latestVal + delta
                     targetVal = latestVal.add(deltaVal); 
-                    actionPrefix = "开始灌溉/补光";
+                    actionPrefix = config.actionName;
                 }
                 
                 // 修正 TargetVal 显示，用户模板说 "提升至 xx (target)"
@@ -219,11 +219,11 @@ public class AiPredictionServiceImpl implements AiPredictionService {
                 String content = String.format(
                         "🟡 预测预警（L1）\n" +
                         "🟡 预计 %s 后 %s可能%s安全阈值\n" +
-                        "建议提前关注%s条件\n" +
+                        "建议提前关注%s\n" +
                         "建议在 %d 小时内 %s，\n" +
                         "将%s%s至 %s (target)",
                         earliestTime, config.name, config.isHighRisk ? "高于" : "低于",
-                        config.isHighRisk ? "通风" : "灌溉/补光",
+                        config.focusTarget,
                         Math.max(1, startIdx), // 建议在X小时内开始 (即异常开始前)
                         actionPrefix,
                         config.name, config.isHighRisk ? "降低" : "提升", targetStr
@@ -313,10 +313,14 @@ public class AiPredictionServiceImpl implements AiPredictionService {
         String deviceName;
         boolean isHighRisk; // 是否是关注"过高"的情况 (如CO2)
 
+        String focusTarget;
+        String actionName;
+
         ParamConfig(String name, String unit, 
                     Function<PredictionPoint, BigDecimal> valueGetter,
                     Function<IotSensorData, BigDecimal> latestValueGetter,
-                    String deviceCode, String deviceName, boolean isHighRisk) {
+                    String deviceCode, String deviceName, boolean isHighRisk,
+                    String focusTarget, String actionName) {
             this.name = name;
             this.unit = unit;
             this.valueGetter = valueGetter;
@@ -324,6 +328,8 @@ public class AiPredictionServiceImpl implements AiPredictionService {
             this.deviceCode = deviceCode;
             this.deviceName = deviceName;
             this.isHighRisk = isHighRisk;
+            this.focusTarget = focusTarget;
+            this.actionName = actionName;
         }
     }
 
