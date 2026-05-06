@@ -1,17 +1,9 @@
 -- 温室/环境表
 create table sys_greenhouse (
 
-                                id          bigint auto_increment primary key comment '主键ID',
-                                env_code    varchar(64) not null comment '环境编码(温室/区域)',
                                 env_name    varchar(100) comment '环境名称',
                                 location    varchar(255) comment '位置描述',
                                 status      tinyint default 1 comment '状态(1:启用,0:停用)',
-
-                                update_time datetime default CURRENT_TIMESTAMP
-                                    on update CURRENT_TIMESTAMP,
-                                create_time datetime default CURRENT_TIMESTAMP,
-
-                                unique key uk_env_code (env_code)
 ) comment '温室/环境表';
 
 

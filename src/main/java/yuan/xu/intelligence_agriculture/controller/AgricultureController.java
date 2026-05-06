@@ -155,6 +155,15 @@ public class AgricultureController {
         return CommonResult.success(list);
     }
 
+    @GetMapping("/query/env/info")
+    public CommonResult<List<SysGreenhouse>> getEnvInfo() {
+        List<SysGreenhouse> list = sysGreenhouseService.lambdaQuery()
+                .eq(SysGreenhouse::getStatus, 1)
+                .orderByAsc(SysGreenhouse::getId)
+                .list();
+        return CommonResult.success(list);
+    }
+
     /**
      * 支持模糊查询某个环境实例,展示后续传参
      *
