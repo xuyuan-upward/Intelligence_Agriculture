@@ -36,7 +36,12 @@ public class AuthInterceptor implements HandlerInterceptor {
         }
         request.setAttribute("authUser", authUser);
         String path = request.getRequestURI();
-        if (path.startsWith("/agriculture/admin") && !"ADMIN".equals(authUser.getRole())) {
+        // /agriculture/admin 路径要求 SUPERADMIN 或 ADMIN 角色
+        // 但 /info 端点允许所有已登录用户访问（用于刷新时同步自己的角色信息）
+        if (path.startsWith("/agriculture/admin")
+                && !path.endsWith("/info")
+                && !"ADMIN".equals(authUser.getRole())
+                && !"SUPERADMIN".equals(authUser.getRole())) {
             writeJson(response, HttpServletResponse.SC_FORBIDDEN, CommonResult.failed("Forbidden"));
             return false;
         }

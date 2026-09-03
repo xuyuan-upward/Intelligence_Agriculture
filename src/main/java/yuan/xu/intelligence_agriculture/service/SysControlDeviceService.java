@@ -26,7 +26,7 @@ public interface SysControlDeviceService extends IService<SysControlDevice> {
     /**
      * 检查是否触发对应的自动控制，以及对应的控制设备是否需要"开启"
      */
-    void checkAndAutoControl(IotSensorData data, Map<Integer, SensorData> integerSensorDataMap);
+    void checkAndAutoControl(String env,List<SensorData> sensorDataList, Map<Integer, SensorData> integerSensorDataMap);
 
 
 

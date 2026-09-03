@@ -106,7 +106,7 @@ public class IotDataServiceImpl extends ServiceImpl<IotSensorDataMapper, IotSens
                         .collect(Collectors.toMap(SensorData::getEnvParameterType, sensorData -> sensorData));
 
                 /// 6. 检查是否触发对应的自动控制，以及对应的控制设备是否需要"开启"，以及对应的当前采集的数据是否处于异常
-                sysControlDeviceService.checkAndAutoControl(data, integerSensorDataMap);
+                sysControlDeviceService.checkAndAutoControl(greenhouseEnvCode,sensorDataList, integerSensorDataMap);
 
                 /// 7. 构建 List<IotSensorDataListResp>
                 IotSensorDataListResp iotSensorDataListResp = buildIotSensorDataListResp(data, sensorDataList, sensorDataBO);

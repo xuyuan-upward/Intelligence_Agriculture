@@ -30,7 +30,7 @@ public class IotSensorDataResp implements Serializable {
     private BigDecimal dataValue = new BigDecimal(0);
 
     /**
-     * 数值异常 0：正常 1：异常 默认：0
+     * 数值正常：0     异常：1    默认是0
      */
     private Integer ex = 0;
 }

@@ -15,4 +15,9 @@ public interface AuthService {
     CommonResult<String> sendCode(SendCodeReq req);
 
     CommonResult<String> resetPassword(ResetPasswordReq req);
+
+    /**
+     * 根据用户ID获取最新用户信息（从数据库查询，确保角色等字段为最新值）
+     */
+    AuthResp getCurrentUserInfo(Long userId);
 }

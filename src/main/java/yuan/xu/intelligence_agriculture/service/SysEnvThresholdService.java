@@ -36,5 +36,5 @@ public interface SysEnvThresholdService extends IService<SysEnvThreshold> {
      * @param envCode
      * @return
      */
-    Map<Long, SysEnvThreshold> FromCacheGetEnvThreshold(String envCode);
+    Map<Integer, SysEnvThreshold> FromCacheGetEnvThreshold(String envCode);
 }

@@ -6,7 +6,9 @@ import yuan.xu.intelligence_agriculture.dto.AuthUser;
 import yuan.xu.intelligence_agriculture.dto.CommonResult;
 import yuan.xu.intelligence_agriculture.model.SysUser;
 import yuan.xu.intelligence_agriculture.req.UpdateRoleReq;
+import yuan.xu.intelligence_agriculture.resp.AuthResp;
 import yuan.xu.intelligence_agriculture.resp.UserResp;
+import yuan.xu.intelligence_agriculture.service.AuthService;
 import yuan.xu.intelligence_agriculture.service.SysUserService;
 
 import javax.servlet.http.HttpServletRequest;
@@ -22,12 +24,34 @@ public class UserAdminController {
     @Autowired
     private SysUserService sysUserService;
 
+    @Autowired
+    private AuthService authService;
+
     @GetMapping
     public CommonResult<List<UserResp>> listUsers() {
         List<SysUser> list = sysUserService.lambdaQuery().orderByDesc(SysUser::getCreateTime).list();
         List<UserResp> resp = list.stream()
                 .map(u -> new UserResp(u.getId(), u.getPhone(), u.getUsername(), u.getRole(), u.getCreateTime()))
                 .collect(Collectors.toList());
+        return CommonResult.success(resp);
+    }
+
+    /**
+     * 获取当前登录用户的最新信息
+     * 从 JWT 解析 userId，通过 service 从数据库查询最新角色等信息
+     * 用途：前端刷新页面时同步角色变更，无需重新登录
+     * 任何已登录用户均可调用（受 AuthInterceptor 保护）
+     */
+    @GetMapping("/info")
+    public CommonResult<AuthResp> getCurrentUserInfo(HttpServletRequest request) {
+        AuthUser authUser = (AuthUser) request.getAttribute("authUser");
+        if (authUser == null || authUser.getUserId() == null) {
+            return CommonResult.failed("用户信息无效");
+        }
+        AuthResp resp = authService.getCurrentUserInfo(authUser.getUserId());
+        if (resp == null) {
+            return CommonResult.failed("用户不存在");
+        }
         return CommonResult.success(resp);
     }
 
@@ -43,10 +67,10 @@ public class UserAdminController {
             return CommonResult.failed("参数错误");
         }
 
-        // 1. 普通用户不能修改任何人的角色（拦截器已处理，这里是二次校验）
-        if (!"ADMIN".equals(currentUser.getRole())) {
+        // 1. 只有超级管理员可以修改角色
+        if (!"SUPERADMIN".equals(currentUser.getRole())) {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-            return CommonResult.failed("权限不足：只有管理员可以修改角色");
+            return CommonResult.failed("权限不足：只有超级管理员可以修改角色");
         }
 
         // 2. 不能修改自己的角色
@@ -61,14 +85,15 @@ public class UserAdminController {
             return CommonResult.failed("目标用户不存在");
         }
 
-        // 3. 管理员不能修改其他管理员的角色
-        if ("ADMIN".equals(targetUser.getRole())) {
+        // 3. 超级管理员不能修改其他超级管理员的角色（防止互相降权）
+        if ("SUPERADMIN".equals(targetUser.getRole())) {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-            return CommonResult.failed("权限不足：不能修改其他管理员的角色");
+            return CommonResult.failed("权限不足：不能修改其他超级管理员的角色");
         }
 
-        if (!"ADMIN".equals(req.getRole()) && !"USER".equals(req.getRole())) {
-            return CommonResult.failed("角色不合法");
+        // 4. 校验目标角色合法性
+        if (!"SUPERADMIN".equals(req.getRole()) && !"ADMIN".equals(req.getRole()) && !"USER".equals(req.getRole())) {
+            return CommonResult.failed("角色不合法，可选值: SUPERADMIN / ADMIN / USER");
         }
 
         boolean updated = sysUserService.lambdaUpdate()

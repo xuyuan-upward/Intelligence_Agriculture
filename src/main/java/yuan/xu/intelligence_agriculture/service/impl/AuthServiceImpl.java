@@ -167,6 +167,23 @@ public class AuthServiceImpl implements AuthService {
         return CommonResult.success("密码修改成功");
     }
 
+    @Override
+    public AuthResp getCurrentUserInfo(Long userId) {
+        if (userId == null) {
+            return null;
+        }
+        SysUser user = sysUserService.getById(userId);
+        if (user == null) {
+            return null;
+        }
+        // 返回数据库中的最新信息（角色可能已被管理员修改）
+        AuthResp resp = new AuthResp();
+        resp.setRole(user.getRole());
+        resp.setUserId(user.getId());
+        resp.setUsername(user.getUsername());
+        return resp;
+    }
+
     private boolean isValidPhone(String phone) {
         return StringUtils.isNotBlank(phone) && PHONE_PATTERN.matcher(phone).matches();
     }

@@ -7,12 +7,14 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import yuan.xu.intelligence_agriculture.model.IotSensorData;
+import yuan.xu.intelligence_agriculture.model.SysControlDevice;
 import yuan.xu.intelligence_agriculture.model.SysEnvThreshold;
 import yuan.xu.intelligence_agriculture.resp.AiAnalysisResp;
 import yuan.xu.intelligence_agriculture.resp.AiSuggestion;
 import yuan.xu.intelligence_agriculture.resp.PredictionPoint;
 import yuan.xu.intelligence_agriculture.service.AiPredictionService;
 import yuan.xu.intelligence_agriculture.service.IotDataService;
+import yuan.xu.intelligence_agriculture.service.SysControlDeviceService;
 import yuan.xu.intelligence_agriculture.websocket.WebSocketServer;
 
 import java.math.BigDecimal;
@@ -29,6 +31,9 @@ public class AiPredictionServiceImpl implements AiPredictionService {
     @Value("${ai.service.url:http://localhost:5000/predict}")
     private String aiServiceUrl;
 
+    @Value("${ai.service.timeout-ms:15000}")
+    private int aiServiceTimeoutMs;
+
     @Autowired
     private IotDataService iotDataService;
 
@@ -37,6 +42,9 @@ public class AiPredictionServiceImpl implements AiPredictionService {
 
     @Autowired
     private WebSocketServer webSocketServer;
+
+    @Autowired
+    private SysControlDeviceService sysControlDeviceService;
 
     @Override
     public AiAnalysisResp getPrediction(String envCode) {
@@ -62,7 +70,7 @@ public class AiPredictionServiceImpl implements AiPredictionService {
         String jsonResult;
         try {
             String jsonBody = JSONUtil.toJsonStr(historyData);
-            jsonResult = HttpUtil.post(aiServiceUrl, jsonBody);
+            jsonResult = HttpUtil.post(aiServiceUrl, jsonBody, aiServiceTimeoutMs);
         } catch (Exception e) {
             e.printStackTrace();
             return resp;
@@ -88,8 +96,19 @@ public class AiPredictionServiceImpl implements AiPredictionService {
             thresholds.put(t.getEnvParameterType(), t);
         });
 
-        // 5. 分析异常并生成建议 (改进后的逻辑：连续异常合并，并计算建议值)
-        List<AiSuggestion> suggestions = analyzePredictionsWithSummary(points, thresholds, latestData, envCode);
+        // 5. 从数据库获取当前环境下的控制设备，按 envThresholdId（即 envParameterType）分组
+        List<SysControlDevice> devices = sysControlDeviceService.listControlDevices(envCode);
+        Map<Integer, SysControlDevice> deviceByType = new HashMap<>();
+        if (devices != null) {
+            for (SysControlDevice d : devices) {
+                if (d.getEnvThresholdId() != null) {
+                    deviceByType.put(d.getEnvThresholdId(), d);
+                }
+            }
+        }
+
+        // 6. 分析异常并生成建议 (改进后的逻辑：连续异常合并，并计算建议值)
+        List<AiSuggestion> suggestions = analyzePredictionsWithSummary(points, thresholds, latestData, envCode, deviceByType);
         resp.setSuggestions(suggestions);
 
         return resp;
@@ -101,35 +120,43 @@ public class AiPredictionServiceImpl implements AiPredictionService {
      * 2. 合并异常点，提取最早和最晚时间点
      * 3. 计算持续时间
      * 4. 根据公式计算建议值 (TargetValue)
+     *
+     * @param deviceByType 按 envParameterType 索引的控制设备 Map（key=envThresholdId，即 envParameterType）
      */
-    private List<AiSuggestion> analyzePredictionsWithSummary(List<PredictionPoint> points, 
-                                                            Map<Integer, SysEnvThreshold> thresholds, 
+    private List<AiSuggestion> analyzePredictionsWithSummary(List<PredictionPoint> points,
+                                                            Map<Integer, SysEnvThreshold> thresholds,
                                                             IotSensorData latestData,
-                                                            String envCode) {
+                                                            String envCode,
+                                                            Map<Integer, SysControlDevice> deviceByType) {
         List<AiSuggestion> suggestions = new ArrayList<>();
         if (points == null || points.isEmpty() || latestData == null) return suggestions;
 
-        // 定义参数映射
+        // 定义参数属性映射（环境参数本身的属性，不包含设备信息）
         // Type: 1:空气温度, 2:空气湿度, 3:土壤温度, 4:土壤湿度, 5:CO2浓度, 6:光照强度
-        Map<Integer, ParamConfig> paramConfigs = new HashMap<>();
-        paramConfigs.put(1, new ParamConfig("空气温度", "°C", PredictionPoint::getAirTemp, IotSensorData::getAirTemp, "C_HEATER_001", "加热片", false, "空气温度调节", "开启升温"));
-        paramConfigs.put(2, new ParamConfig("空气湿度", "%", PredictionPoint::getAirHumidity, IotSensorData::getAirHumidity, "C_HUMIDIFIER_001", "加湿器", false, "加湿条件", "开启加湿"));
-        paramConfigs.put(3, new ParamConfig("土壤温度", "°C", PredictionPoint::getSoilTemp, IotSensorData::getSoilTemp, "C_HEATER_002", "土壤加热片", false, "土壤温度调节", "开启土壤加热"));
-        paramConfigs.put(4, new ParamConfig("土壤湿度", "%", PredictionPoint::getSoilHumidity, IotSensorData::getSoilHumidity, "C_WATER_001", "水泵", false, "灌溉条件", "开始灌溉"));
-        paramConfigs.put(5, new ParamConfig("CO2浓度", "ppm", PredictionPoint::getCo2Concentration, IotSensorData::getCo2Concentration, "C_FAN_001", "风机", true, "通风条件", "开启排风"));
-        paramConfigs.put(6, new ParamConfig("光照强度", "Lux", PredictionPoint::getLightIntensity, IotSensorData::getLightIntensity, "C_LIGHT_001", "补光灯", false, "补光条件", "开始补光"));
+        Map<Integer, ParamAttr> paramAttrs = new HashMap<>();
+        paramAttrs.put(1, new ParamAttr("空气温度", "°C", PredictionPoint::getAirTemp, IotSensorData::getAirTemp, false, "空气温度调节", "开启升温"));
+        paramAttrs.put(2, new ParamAttr("空气湿度", "%", PredictionPoint::getAirHumidity, IotSensorData::getAirHumidity, false, "加湿条件", "开启加湿"));
+        paramAttrs.put(3, new ParamAttr("土壤温度", "°C", PredictionPoint::getSoilTemp, IotSensorData::getSoilTemp, false, "土壤温度调节", "开启土壤加热"));
+        paramAttrs.put(4, new ParamAttr("土壤湿度", "%", PredictionPoint::getSoilHumidity, IotSensorData::getSoilHumidity, false, "灌溉条件", "开始灌溉"));
+        paramAttrs.put(5, new ParamAttr("CO2浓度", "ppm", PredictionPoint::getCo2Concentration, IotSensorData::getCo2Concentration, true, "通风条件", "开启排风"));
+        paramAttrs.put(6, new ParamAttr("光照强度", "Lux", PredictionPoint::getLightIntensity, IotSensorData::getLightIntensity, false, "补光条件", "开始补光"));
 
-        for (Map.Entry<Integer, ParamConfig> entry : paramConfigs.entrySet()) {
+        for (Map.Entry<Integer, ParamAttr> entry : paramAttrs.entrySet()) {
             Integer type = entry.getKey();
-            ParamConfig config = entry.getValue();
+            ParamAttr attr = entry.getValue();
             SysEnvThreshold threshold = thresholds.get(type);
             if (threshold == null) continue;
+
+            // 从数据库动态获取该环境参数类型关联的控制设备
+            SysControlDevice device = deviceByType.get(type);
+            String deviceCode = (device != null) ? device.getDeviceCode() : null;
+            String deviceName = (device != null) ? device.getDeviceName() : null;
 
             BigDecimal minThreshold = threshold.getMinValue();
             BigDecimal maxThreshold = threshold.getMaxValue();
 
             // 寻找连续异常区间
-            List<Range> abnormalRanges = findAbnormalRanges(points, config, minThreshold, maxThreshold);
+            List<Range> abnormalRanges = findAbnormalRanges(points, attr, minThreshold, maxThreshold);
 
             // 如果有多个异常区间，我们取"整体"的统计信息
             if (!abnormalRanges.isEmpty()) {
@@ -137,18 +164,15 @@ public class AiPredictionServiceImpl implements AiPredictionService {
                 Range firstRange = abnormalRanges.get(0);
                 String earliestTime = points.get(firstRange.start).getTime();
                 
-                // 最晚时间点 (用于计算持续时间，这里简化为所有异常时间段的总和，或者第一个开始到最后一个结束？)
-                // 用户说："提取最早...和最晚...计算持续时间"。
-                // 假设是：从第一个异常开始，到最后一个异常结束的总跨度
                 Range lastRange = abnormalRanges.get(abnormalRanges.size() - 1);
                 int startIdx = firstRange.start;
                 int endIdx = lastRange.end;
-                int duration = endIdx - startIdx + 1; // 假设每点代表1小时
+                int duration = endIdx - startIdx + 1;
                 
                 // 寻找预测区间内的极值 (PredMin 或 PredMax)
                 BigDecimal predExtreme = firstRange.extremeVal;
                 for(Range r : abnormalRanges) {
-                    if (config.isHighRisk) {
+                    if (attr.isHighRisk) {
                         if (r.extremeVal.compareTo(predExtreme) > 0) predExtreme = r.extremeVal;
                     } else {
                         if (r.extremeVal.compareTo(predExtreme) < 0) predExtreme = r.extremeVal;
@@ -156,86 +180,57 @@ public class AiPredictionServiceImpl implements AiPredictionService {
                 }
 
                 // 计算建议值
-                BigDecimal latestVal = config.latestValueGetter.apply(latestData);
+                BigDecimal latestVal = attr.latestValueGetter.apply(latestData);
                 if (latestVal == null) latestVal = BigDecimal.ZERO;
 
-                BigDecimal targetVal; // 这里作为"Target"展示在"提升至..."
-                BigDecimal deltaVal;  // 补充/减少的量
+                BigDecimal targetVal;
+                BigDecimal deltaVal;
 
                 String actionPrefix;
                 
-                // 计算公式更新
-                // num = max(latestVal, minThreshold)
-                // target (delta) = (num - predExtreme) + margin
-                // Display Target = latestVal + delta (Raise to ...)
-
-                if (config.isHighRisk) {
-                    // CO2 高于阈值 (maxThreshold)
-                    // num = min(latestVal, maxThreshold) -- 逻辑反转?
-                    // 用户只给了低于阈值的公式。对于高于阈值，假设是对称的。
-                    // 假设 num = latestVal < max ? latestVal : max
-                    // delta = (latestVal - predExtreme) ... 
-                    // Let's stick to simple logic for High Risk if user didn't specify.
-                    // Or reuse the logic:
-                    // Delta = (PredMax - Latest) + Margin
-                    
+                if (attr.isHighRisk) {
                     BigDecimal margin = maxThreshold.multiply(new BigDecimal("0.05"));
                     deltaVal = predExtreme.subtract(latestVal).add(margin);
                     
-                    actionPrefix = config.actionName;
-                    targetVal = latestVal.subtract(deltaVal); // 降低至...
+                    actionPrefix = attr.actionName;
+                    targetVal = latestVal.subtract(deltaVal);
                 } else {
-                    // 低于阈值 (minThreshold)
-                    // num = max(latestVal, minThreshold)
                     BigDecimal num = latestVal.compareTo(minThreshold) > 0 ? latestVal : minThreshold;
                     BigDecimal margin = minThreshold.multiply(new BigDecimal("0.05"));
                     
-                    // target (delta) = (num - predMin) + margin
                     deltaVal = num.subtract(predExtreme).add(margin);
                     
-                    // Display Target (提升至) = latestVal + delta
                     targetVal = latestVal.add(deltaVal); 
-                    actionPrefix = config.actionName;
+                    actionPrefix = attr.actionName;
                 }
                 
-                // 修正 TargetVal 显示，用户模板说 "提升至 xx (target)"
-                // 如果是光照，我们显示补充量。如果是湿度，显示目标值。
                 String targetStr;
-                if (type == 6) { // 光照
-                     // 光照通常说"补充多少Lux"，或者"开启补光灯"
-                     // 用户说 "target = (num - pred) + margin" -> Light_target
-                     // 假设用户想看到的是这个 Delta
-                     targetStr = deltaVal.setScale(1, RoundingMode.HALF_UP) + " " + config.unit;
+                if (type == 6) {
+                     targetStr = deltaVal.setScale(1, RoundingMode.HALF_UP) + " " + attr.unit;
                 } else {
-                     targetStr = targetVal.setScale(1, RoundingMode.HALF_UP) + config.unit;
+                     targetStr = targetVal.setScale(1, RoundingMode.HALF_UP) + attr.unit;
                 }
 
-                // 格式化消息
-                // 🟡 预测预警（L1）
-                // 🟡 预计 4 小时后 土壤湿度可能低于安全阈值
-                // 建议提前关注灌溉条件
-                // 建议在 3 小时内 开始灌溉，
-                // 将土壤湿度提升至 38–40%（target ）
                 String content = String.format(
                         "🟡 预测预警（L1）\n" +
                         "🟡 预计 %s 后 %s可能%s安全阈值\n" +
                         "建议提前关注%s\n" +
                         "建议在 %d 小时内 %s，\n" +
                         "将%s%s至 %s (target)",
-                        earliestTime, config.name, config.isHighRisk ? "高于" : "低于",
-                        config.focusTarget,
-                        Math.max(1, startIdx), // 建议在X小时内开始 (即异常开始前)
+                        earliestTime, attr.name, attr.isHighRisk ? "高于" : "低于",
+                        attr.focusTarget,
+                        Math.max(1, startIdx),
                         actionPrefix,
-                        config.name, config.isHighRisk ? "降低" : "提升", targetStr
+                        attr.name, attr.isHighRisk ? "降低" : "提升", targetStr
                 );
 
                 AiSuggestion s = new AiSuggestion();
                 s.setTime("未来" + (startIdx + 1) + "小时");
-                s.setTitle(config.name + (config.isHighRisk ? "过高" : "过低") + "风险");
+                s.setTitle(attr.name + (attr.isHighRisk ? "过高" : "过低") + "风险");
                 s.setContent(content);
-                s.setType(config.isHighRisk ? "danger" : "warning");
-                s.setActionDevice(config.deviceCode);
-                s.setDeviceName(config.deviceName);
+                s.setType(attr.isHighRisk ? "danger" : "warning");
+                s.setActionDevice(deviceCode);
+                s.setDeviceName(deviceName);
                 suggestions.add(s);
 
                 // 推送给控制中心 (WebSocket) - 只推一条，且增加防抖 (30分钟内不重复推送同类型)
@@ -246,22 +241,22 @@ public class AiPredictionServiceImpl implements AiPredictionService {
         return suggestions;
     }
 
-    private List<Range> findAbnormalRanges(List<PredictionPoint> points, ParamConfig config, BigDecimal min, BigDecimal max) {
+    private List<Range> findAbnormalRanges(List<PredictionPoint> points, ParamAttr attr, BigDecimal min, BigDecimal max) {
         List<Range> ranges = new ArrayList<>();
         Range currentRange = null;
 
         for (int i = 0; i < points.size(); i++) {
-            BigDecimal val = config.valueGetter.apply(points.get(i));
+            BigDecimal val = attr.valueGetter.apply(points.get(i));
             if (val == null) continue;
 
-            boolean abnormal = config.isHighRisk ? (val.compareTo(max) > 0) : (val.compareTo(min) < 0);
+            boolean abnormal = attr.isHighRisk ? (val.compareTo(max) > 0) : (val.compareTo(min) < 0);
 
             if (abnormal) {
                 if (currentRange == null) {
                     currentRange = new Range(i, i, val);
                 } else {
                     currentRange.end = i;
-                    if (config.isHighRisk) {
+                    if (attr.isHighRisk) {
                         if (val.compareTo(currentRange.extremeVal) > 0) currentRange.extremeVal = val;
                     } else {
                         if (val.compareTo(currentRange.extremeVal) < 0) currentRange.extremeVal = val;
@@ -304,29 +299,29 @@ public class AiPredictionServiceImpl implements AiPredictionService {
         }
     }
 
-    private static class ParamConfig {
-        String name;
-        String unit;
-        Function<PredictionPoint, BigDecimal> valueGetter;
-        Function<IotSensorData, BigDecimal> latestValueGetter;
-        String deviceCode;
-        String deviceName;
-        boolean isHighRisk; // 是否是关注"过高"的情况 (如CO2)
+    /**
+     * 环境参数属性（不含设备信息，设备信息从数据库动态获取）
+     * 仅保留参数类型本身的固有属性：名称、单位、取值函数、风险方向等
+     */
+    private static class ParamAttr {
+        String name;            // 参数中文名
+        String unit;            // 参数单位
+        Function<PredictionPoint, BigDecimal> valueGetter;       // 预测点取值函数
+        Function<IotSensorData, BigDecimal> latestValueGetter;   // 最新数据取值函数
+        boolean isHighRisk;     // 是否是关注"过高"的情况 (如CO2)
 
-        String focusTarget;
-        String actionName;
+        String focusTarget;     // 建议关注的条件描述（如"灌溉条件"、"通风条件"）
+        String actionName;      // 建议动作名称（如"开启升温"、"开始灌溉"）
 
-        ParamConfig(String name, String unit, 
-                    Function<PredictionPoint, BigDecimal> valueGetter,
-                    Function<IotSensorData, BigDecimal> latestValueGetter,
-                    String deviceCode, String deviceName, boolean isHighRisk,
-                    String focusTarget, String actionName) {
+        ParamAttr(String name, String unit,
+                  Function<PredictionPoint, BigDecimal> valueGetter,
+                  Function<IotSensorData, BigDecimal> latestValueGetter,
+                  boolean isHighRisk,
+                  String focusTarget, String actionName) {
             this.name = name;
             this.unit = unit;
             this.valueGetter = valueGetter;
             this.latestValueGetter = latestValueGetter;
-            this.deviceCode = deviceCode;
-            this.deviceName = deviceName;
             this.isHighRisk = isHighRisk;
             this.focusTarget = focusTarget;
             this.actionName = actionName;

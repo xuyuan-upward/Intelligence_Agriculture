@@ -1,9 +1,7 @@
 package yuan.xu.intelligence_agriculture.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -16,7 +14,6 @@ import yuan.xu.intelligence_agriculture.req.EnvThresholdReq;
 import yuan.xu.intelligence_agriculture.resp.EnvThresholdResp;
 import yuan.xu.intelligence_agriculture.service.SysEnvThresholdService;
 
-import javax.annotation.PostConstruct;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -131,7 +128,7 @@ public class SysEnvThresholdServiceImpl extends ServiceImpl<SysEnvThresholdMappe
     @Override
     public List<EnvThresholdResp> queryEnvThreshold(String envCode) {
         // 先建立一个null的list,如果entries为空,则返回一个空的list,避免直接返回null
-        Map<Long, SysEnvThreshold> longSysEnvThresholdMap = FromCacheGetEnvThreshold(envCode);
+        Map<Integer, SysEnvThreshold> longSysEnvThresholdMap = FromCacheGetEnvThreshold(envCode);
         List<EnvThresholdResp> envThresholdRespList = new ArrayList<>();
         longSysEnvThresholdMap.forEach(
                 (sysId, sysEnvThreshold) -> {
@@ -146,11 +143,17 @@ public class SysEnvThresholdServiceImpl extends ServiceImpl<SysEnvThresholdMappe
         return envThresholdRespList;
     }
 
-    public Map<Long, SysEnvThreshold> FromCacheGetEnvThreshold(String envCode) {
+    /**
+     * 策略是：阈值缓存的加载策略是 懒加载（首次访问时），不是启动预加载。缓存没有了再从系统中获取
+     *
+     * @param envCode
+     * @return
+     */
+    public Map<Integer, SysEnvThreshold> FromCacheGetEnvThreshold(String envCode) {
         Map<Object, Object> entries = redisTemplate.opsForHash().entries(ENV_THRESHOLD_KEY + envCode);
         if (!entries.isEmpty()) {
-            HashMap<Long, SysEnvThreshold> sysEnvThresholdHashMap = new HashMap<>();
-            entries.forEach((k, v) -> sysEnvThresholdHashMap.put(Long.valueOf((String) k), (SysEnvThreshold) v));
+            HashMap<Integer, SysEnvThreshold> sysEnvThresholdHashMap = new HashMap<>();
+            entries.forEach((k, v) -> sysEnvThresholdHashMap.put(Integer.valueOf((String) k), (SysEnvThreshold) v));
             return sysEnvThresholdHashMap;
         }
         // 缓存为null直接从数据库中查
@@ -158,9 +161,9 @@ public class SysEnvThresholdServiceImpl extends ServiceImpl<SysEnvThresholdMappe
         List<SysEnvThreshold> list = lambdaQuery().eq(SysEnvThreshold::getGreenhouseEnvCode, envCode).list();
         if (!list.isEmpty()) {
             // 构建缓存
-            redisTemplate.opsForHash().putAll(ENV_THRESHOLD_KEY + envCode, list.stream().collect(Collectors.toMap(item -> item.getId().toString(), item -> item)));
+            redisTemplate.opsForHash().putAll(ENV_THRESHOLD_KEY + envCode, list.stream().collect(Collectors.toMap(item -> item.getEnvParameterType().toString(), item -> item)));
         }
-        return list.stream().collect(Collectors.toMap(SysEnvThreshold::getId, item -> item));
+        return list.stream().collect(Collectors.toMap(SysEnvThreshold::getEnvParameterType, item -> item));
 
     }
 

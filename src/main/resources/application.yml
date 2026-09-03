@@ -39,9 +39,10 @@ logging:
 ai:
   service:
     url: http://localhost:5000/predict
+    timeout-ms: 15000
 
 mqtt:
-  broker: ssl://i5548fc5.ala.cn-hangzhou.emqxsl.cn:8883
+  broker: ssl://e1fee878.ala.cn-hangzhou.emqxsl.cn:8883
   client-id: springboot_server
   username: xuyuan
   password: 12345678

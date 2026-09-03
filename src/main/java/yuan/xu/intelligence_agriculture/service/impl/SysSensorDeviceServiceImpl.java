@@ -10,6 +10,7 @@ import yuan.xu.intelligence_agriculture.model.SysSensorDevice;
 import yuan.xu.intelligence_agriculture.service.SysSensorDeviceService;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static yuan.xu.intelligence_agriculture.key.RedisKey.DEVICE_LAST_TIME_KEY;
@@ -66,5 +67,17 @@ public class SysSensorDeviceServiceImpl extends ServiceImpl<SysSensorDeviceMappe
             statusMap.put(deviceCode, (lastActiveMs > 0 && now - lastActiveMs < 12000) ? 1 : 0);
         }
         return statusMap;
+    }
+
+    /**
+     * 根据环境编码查询该环境下所有采集设备，并注入在线状态
+     */
+    @Override
+    public List<SysSensorDevice> listSensorDevices(String envCode) {
+        // 查询该环境下所有采集设备
+        List<SysSensorDevice> devices = this.lambdaQuery()
+                .eq(SysSensorDevice::getGreenhouseEnvCode, envCode)
+                .list();
+        return devices;
     }
 }

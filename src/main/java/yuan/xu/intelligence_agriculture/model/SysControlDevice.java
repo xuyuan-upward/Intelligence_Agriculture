@@ -37,9 +37,9 @@ public class SysControlDevice implements Serializable {
     private String greenhouseEnvCode;
 
     /**
-     * 关联环境阈值ID
+     * 关联环境参数类型
      */
-    private Long envThresholdId;
+    private Integer envThresholdId;
 
     /**
      * 控制模式 (0:手动, 1:自动)

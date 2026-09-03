@@ -30,6 +30,7 @@ import javax.annotation.PostConstruct;
 import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static yuan.xu.intelligence_agriculture.enums.ControlStatus.OFF;
@@ -234,26 +235,30 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
 
     /**
      * 1. 检查控制模式  2.自动模式:触发对应的控制,并且将对应的控制设备状态推送给前端
-     * @param data
+     * @param
      * @param integerSensorDataMap
      */
     @SuppressWarnings("unchecked")
     @Override
-    public void checkAndAutoControl(IotSensorData data, Map<Integer, SensorData> integerSensorDataMap) {
-        String greenhouseEnvCode = data.getGreenhouseEnvCode();
+    public void checkAndAutoControl(String env,List<SensorData> sensorDataList, Map<Integer, SensorData> integerSensorDataMap) {
+        String greenhouseEnvCode = env;
         /// 1 是否自动 (决策入口)
         if (!envIsAuto(greenhouseEnvCode)) {
             return;
         }
         /// 2 从缓存中拿控制整个控制设备的信息
         List<SysControlDevice> autoDeviceCache = fromCacheGetControlDevices(greenhouseEnvCode);
-
+        ///  key:环境参数类型 ，value：单个控制设备值
+        Map<Integer, SysControlDevice> sysControlDeviceMap = autoDeviceCache.stream().collect(Collectors.toMap(
+                SysControlDevice::getEnvThresholdId,
+                Function.identity()
+        ));
         /**
          * 3.获取当前环境下的环境阈值
-         * 用map来存储对应不同环境下的环境阈值,key根据不同环境来区分,filed:根据环境ID来区分,value:对应的整个环境阈值对象
-         * 为什么filed:根据环境ID来区分?因为对应的控制器只和对应的环境阈值挂钩,其中挂钩是靠:环境阈值ID
+         * 用map来存储对应不同环境下的环境阈值,key根据不同环境来区分,filed:根据环境参数来区分,value:对应的整个环境单个阈值对象
+         * 为什么filed:根据环境参数类型来区分?因为对应的控制器只和对应的环境参数类型挂钩,其中挂钩是靠:环境阈值参数
          */
-         Map<Long, SysEnvThreshold> sysEnvThresholdHashMap = sysEnvThresholdService.FromCacheGetEnvThreshold(greenhouseEnvCode);
+         Map<Integer, SysEnvThreshold> sysEnvThresholdHashMap = sysEnvThresholdService.FromCacheGetEnvThreshold(greenhouseEnvCode);
         // 进入自动判断的逻辑入口
         if (autoDeviceCache == null || autoDeviceCache.isEmpty() || sysEnvThresholdHashMap == null) {
             return;
@@ -264,8 +269,8 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
         // 更新后的
         Map<String, Integer> AfterUpdateControlStatusMap = new HashMap<>(BeforeUpdateControlStatusMap);
         // 自动控制每个设备
-        for (SysControlDevice sysControlDevice : autoDeviceCache) {
-            autoControlOneDevice(sysControlDevice, data, integerSensorDataMap, sysEnvThresholdHashMap, AfterUpdateControlStatusMap);
+        for (SensorData sensorData : sensorDataList) {
+            autoControlOneDevice(sensorData, sysControlDeviceMap, integerSensorDataMap, sysEnvThresholdHashMap, AfterUpdateControlStatusMap);
         }
 
         // 统一推送设备状态变更
@@ -354,38 +359,30 @@ public class SysControlDeviceServiceImpl extends ServiceImpl<SysControlDeviceMap
 
     /**
      * 单设备自动检查 + 控制
-     * @param device
-     * @param data
+     * @param
+     * @param
      * @param sensorDataMap
      * @param thresholdMap
      */
-    private void autoControlOneDevice(SysControlDevice device,
-                                      IotSensorData data,
+    private void autoControlOneDevice(SensorData sensorData,
+                                      Map<Integer, SysControlDevice> sysControlDeviceMap,
                                       Map<Integer, SensorData> sensorDataMap,
-                                      Map<Long, SysEnvThreshold> thresholdMap,
+                                      Map<Integer, SysEnvThreshold> thresholdMap,
                                       Map<String, Integer> updatedDevices) {
-        // 设备不是自动模式，直接跳过
-        boolean deviceIsAuto = deviceIsAuto(device);
-        if (!deviceIsAuto) {
-            return;
-        }
 
-        SysEnvThreshold threshold = thresholdMap.get(device.getEnvThresholdId());
+        SysEnvThreshold threshold = thresholdMap.get(sensorData.getEnvParameterType());
         if (threshold == null) return;
-
-        SensorData sensorData = sensorDataMap.get(threshold.getEnvParameterType());
         if (sensorData == null || sensorData.getData() == null) return;
-
         BigDecimal currentVal = sensorData.getData();
         BigDecimal min = threshold.getMinValue();
         BigDecimal max = threshold.getMaxValue();
         if (min == null || max == null) return;
 
-        Integer typeCode = threshold.getEnvParameterType();
+        // 此时应该找出当前测试的值，最终应该由哪个设备来控制执行
+        SysControlDevice device = sysControlDeviceMap.get(sensorData.getEnvParameterType());
 
         // 判断当前控制设备是否需要启动或关闭
-        int action = computeAction(typeCode, currentVal, min, max, device);
-
+        int action = computeAction(sensorData.getEnvParameterType(), currentVal, min, max, device);
         // todo 去掉控制设备逻辑运行状态，改成直接根据当前阈值来直接控制设备，
         //  不需要拿之前逻辑状态来作为判断依据，解决了设备状态漂移（物理状态和缓存状态不一致问题）
         if (action == 1) {

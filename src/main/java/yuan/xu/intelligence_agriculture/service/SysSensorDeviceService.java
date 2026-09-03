@@ -11,4 +11,9 @@ public interface SysSensorDeviceService extends IService<SysSensorDevice> {
      * 判断对应采集设备状态是否离线,并获取判断后的所有设备状态
      */
     Map<String, Integer> listAllDevicesStatus(String greenHouseCode);
+
+    /**
+     * 根据环境编码查询该环境下所有采集设备(含在线状态)
+     */
+    List<SysSensorDevice> listSensorDevices(String envCode);
 }

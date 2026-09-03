@@ -5,10 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.*;
 import yuan.xu.intelligence_agriculture.dto.CommonResult;
-import yuan.xu.intelligence_agriculture.model.IotSensorData;
-import yuan.xu.intelligence_agriculture.model.SysControlDevice;
-import yuan.xu.intelligence_agriculture.model.SysEnvThreshold;
-import yuan.xu.intelligence_agriculture.model.SysGreenhouse;
+import yuan.xu.intelligence_agriculture.model.*;
 import yuan.xu.intelligence_agriculture.req.*;
 import yuan.xu.intelligence_agriculture.resp.AiAnalysisResp;
 import yuan.xu.intelligence_agriculture.resp.EnvThresholdResp;
@@ -36,6 +33,8 @@ public class AgricultureController {
     @Autowired
     private SysControlDeviceService sysControlDeviceService;
 
+    @Autowired
+    private SysSensorDeviceService sysSensorDeviceService;
 
     @Autowired
     private AiPredictionService aiPredictionService;
@@ -73,7 +72,7 @@ public class AgricultureController {
      */
     @PostMapping("/update/device/control")
     public CommonResult<String> controlDevice(@RequestBody DeviceControlReq req) {
-        sysControlDeviceService.controlDevice(req.getDeviceCode(), req.getStatus(),req.getEnvCode(),req.getDeviceName());
+            sysControlDeviceService.controlDevice(req.getDeviceCode(), req.getStatus(),req.getEnvCode(),req.getDeviceName());
         return CommonResult.success("操作成功");
     }
 
@@ -82,9 +81,19 @@ public class AgricultureController {
      * @param envCode
      * @return
      */
-    @GetMapping("/query/device/list")
+    @GetMapping("/query/control/list")
     public CommonResult<List<SysControlDevice>> listControlDevices(@RequestParam String envCode) {
         return CommonResult.success(sysControlDeviceService.listControlDevices(envCode));
+    }
+
+    /**
+     * 获取某个环境下的所有采集设备(传感器)
+     * @param envCode 环境编码
+     * @return 采集设备列表(含在线状态)
+     */
+    @GetMapping("/query/sensor/list")
+    public CommonResult<List<SysSensorDevice>> listSensorDevices(@RequestParam String envCode) {
+        return CommonResult.success(sysSensorDeviceService.listSensorDevices(envCode));
     }
 
     /**
